@@ -17,9 +17,10 @@ int main(void) {
 		cudaGetDeviceProperties(&props, i);
 		printf("Device nr.: %d\n", i);
 		printf("  Device name: %s\n", props.name);
-		printf("  Memory clock rate: (KHz) %d\n", props.memoryClockRate);
+		printf("  Memory clock rate: (MHz) %lf\n", props.memoryClockRate/1000.0);
 		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
-		printf("  Peak memory bandwith (GB/s): %f\n\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
+		printf("  Peak memory bandwith (GB/s): %f\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
+		printf("  Compute capability: %d.%d\n\n", props.major, props.minor);
 	}
 
 	int n = 1 << 20;
@@ -39,6 +40,16 @@ int main(void) {
 	cudaMemcpy(d_y, y, n*sizeof(float), cudaMemcpyHostToDevice);
 
 	saxpy<<<(n+255)/256, 256>>>(n, 2.0f, d_x, d_y);
+
+	cudaError_t errSync = cudaGetLastError();
+	cudaError_t errAsync = cudaDeviceSynchronize();
+
+	if (errSync != cudaSuccess) {
+		printf("Sync kernel error: %s\n", cudaGetErrorString(errSync));
+	}
+	if (errAsync != cudaSuccess) {
+		printf("Async kernel error: %s\n", cudaGetErrorString(errAsync));
+	}
 
 	cudaMemcpy(y, d_y, n*sizeof(float), cudaMemcpyDeviceToHost);
 
