@@ -25,13 +25,14 @@ int main(void) {
 
 	int n = 1 << 20;
 	float *x, *y, *d_x, *d_y;
-	x = (float*)malloc(n*sizeof(float));
-	y = (float*)malloc(n*sizeof(float));
+	// Using pinned host memory to speed up transfer
+	cudaMallocHost((void **)&x, n*sizeof(float));
+	cudaMallocHost((void **)&y, n*sizeof(float));
 
-	cudaMalloc(&d_x, n*sizeof(float));
-	cudaMalloc(&d_y, n*sizeof(float));
+	cudaMalloc((void **)&d_x, n*sizeof(float));
+	cudaMalloc((void **)&d_y, n*sizeof(float));
 
-	for (int i = 0; i < n; ++i) {
+	for (int i = 0; i < n; i++) {
 		x[i] = 1.0f;
 		y[i] = 2.0f;
 	}
@@ -57,10 +58,10 @@ int main(void) {
 	for (int i = 0; i < n; ++i) {
 		maxError = max(maxError, abs(y[i]-4.0f));
 	}
-	printf("Max error: %f\n", maxError);
+		printf("Max error: %f\n", maxError);
 
 	cudaFree(d_x);
 	cudaFree(d_y);
-	free(x);
-	free(y);
+	cudaFreeHost(x);
+	cudaFreeHost(y);
 }
