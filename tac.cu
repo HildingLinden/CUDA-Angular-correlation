@@ -7,10 +7,22 @@ void saxpy(int n, float a, float *x, float *y) {
 }
 
 int main(void) {
-	//context creation
-	cudaFree(0);
+	// Context creation
+	//cudaFree(0);
 
-	int n = 1 << 30;
+	int deviceCount;
+	cudaGetDeviceCount(&deviceCount);
+	for (int i = 0; i < deviceCount; i++) {
+		cudaDeviceProp props;
+		cudaGetDeviceProperties(&props, i);
+		printf("Device nr.: %d\n", i);
+		printf("  Device name: %s\n", props.name);
+		printf("  Memory clock rate: (KHz) %d\n", props.memoryClockRate);
+		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
+		printf("  Peak memory bandwith (GB/s): %f\n\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
+	}
+
+	int n = 1 << 20;
 	float *x, *y, *d_x, *d_y;
 	x = (float*)malloc(n*sizeof(float));
 	y = (float*)malloc(n*sizeof(float));
