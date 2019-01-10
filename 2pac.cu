@@ -1,4 +1,8 @@
 #include <stdio.h>
+#include <fstream>
+#include <iostream>
+
+// 2-point angular correlation
 
 __global__
 void saxpy(int n, float a, float *x, float *y) {
@@ -6,16 +10,49 @@ void saxpy(int n, float a, float *x, float *y) {
 	if (i < n) y[i] = a*x[i] + y[i];
 }
 
+struct CoordinatePair {
+	float rightAscension;
+	float declination;
+};
+
+CoordinatePair * readFile(std::string name) {
+	// Read file
+	std::ifstream infile(name.c_str());
+
+	// Get amount of coordinate pairs
+	int nCoordinatePairs;
+	infile >> nCoordinatePairs;
+	printf("Found %d coordinate pairs in %s\n", nCoordinatePairs, name.c_str());
+
+	// Allocate memory for all pairs
+	CoordinatePair *arr = (CoordinatePair *)malloc(sizeof(CoordinatePair) * nCoordinatePairs);
+
+	// Initialize the array of pairs
+	float asc, dec;
+	int index = 0;
+	while (infile >> asc >> dec) {
+		if (index < nCoordinatePairs) {
+			arr[index].rightAscension = asc;
+			arr[index++].declination = dec;
+		} else {
+			printf("Number of coordinate pairs given in file does not match the actual amount in %s\n", name.c_str());
+			exit(1);
+		}
+	}
+
+	return arr;
+}
+
 int main(void) {
-	// Context creation
-	//cudaFree(0);
+	CoordinatePair *D = readFile("data_100k_arcmin.txt");
+	CoordinatePair *R = readFile("flat_100k_arcmin.txt");
 
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
 	for (int i = 0; i < deviceCount; i++) {
 		cudaDeviceProp props;
 		cudaGetDeviceProperties(&props, i);
-		printf("Device nr.: %d\n", i);
+		printf("\nDevice nr.: %d\n", i);
 		printf("  Device name: %s\n", props.name);
 		printf("  Memory clock rate: (MHz) %lf\n", props.memoryClockRate/1000.0);
 		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
