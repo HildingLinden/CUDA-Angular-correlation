@@ -5,17 +5,14 @@
 // 2-point angular correlation
 
 __global__
-void saxpy(int n, float a, float *x, float *y) {
+void kernel(int n, float *x, float *y) {
 	int i = blockIdx.x*blockDim.x + threadIdx.x;
-	if (i < n) y[i] = a*x[i] + y[i];
+	if (i < n) {
+		y[i] = x[i] + y[i];
+	}
 }
 
-struct CoordinatePair {
-	float rightAscension;
-	float declination;
-};
-
-CoordinatePair * readFile(std::string name) {
+float * readFile(std::string name) {
 	// Read file
 	std::ifstream infile(name.c_str());
 
@@ -25,15 +22,15 @@ CoordinatePair * readFile(std::string name) {
 	printf("Found %d coordinate pairs in %s\n", nCoordinatePairs, name.c_str());
 
 	// Allocate memory for all pairs
-	CoordinatePair *arr = (CoordinatePair *)malloc(sizeof(CoordinatePair) * nCoordinatePairs);
+	float *arr = (float *)malloc(sizeof(float) * 2 * nCoordinatePairs);
 
 	// Initialize the array of pairs
 	float asc, dec;
 	int index = 0;
 	while (infile >> asc >> dec) {
-		if (index < nCoordinatePairs) {
-			arr[index].rightAscension = asc;
-			arr[index++].declination = dec;
+		if (index < nCoordinatePairs * 2) {
+			arr[index++] = asc;
+			arr[index++] = dec;
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in %s\n", name.c_str());
 			exit(1);
@@ -44,9 +41,7 @@ CoordinatePair * readFile(std::string name) {
 }
 
 int main(void) {
-	CoordinatePair *D = readFile("data_100k_arcmin.txt");
-	CoordinatePair *R = readFile("flat_100k_arcmin.txt");
-
+	// Info about the GPU
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
 	for (int i = 0; i < deviceCount; i++) {
@@ -60,24 +55,25 @@ int main(void) {
 		printf("  Compute capability: %d.%d\n\n", props.major, props.minor);
 	}
 
-	int n = 1 << 20;
-	float *x, *y, *d_x, *d_y;
-	// Using pinned host memory to speed up transfer
-	cudaMallocHost((void **)&x, n*sizeof(float));
-	cudaMallocHost((void **)&y, n*sizeof(float));
+	// Reading both files and populating the arrays
+	float *D = readFile("data_100k_arcmin.txt");
+	float *R = readFile("flat_100k_arcmin.txt");
 
-	cudaMalloc((void **)&d_x, n*sizeof(float));
-	cudaMalloc((void **)&d_y, n*sizeof(float));
+	// Get amount of pairs to be able to allocate memory on device
+	std::ifstream infile("data_100k_arcmin.txt");
+	int nCoordinatePairs;
+	infile >> nCoordinatePairs;
+	int size = nCoordinatePairs * 2 * sizeof(float);
 
-	for (int i = 0; i < n; i++) {
-		x[i] = 1.0f;
-		y[i] = 2.0f;
-	}
+	float *d_D, *d_R;
 
-	cudaMemcpy(d_x, x, n*sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_y, y, n*sizeof(float), cudaMemcpyHostToDevice);
+	cudaMalloc((void **)&d_D, size);
+	cudaMalloc((void **)&d_R, size);
 
-	saxpy<<<(n+255)/256, 256>>>(n, 2.0f, d_x, d_y);
+	cudaMemcpy(d_D, D, size, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_R, R, size, cudaMemcpyHostToDevice);
+
+	kernel<<<(nCoordinatePairs+255)/256, 256>>>(nCoordinatePairs, d_D, d_R);
 
 	cudaError_t errSync = cudaGetLastError();
 	cudaError_t errAsync = cudaDeviceSynchronize();
@@ -89,16 +85,18 @@ int main(void) {
 		printf("Async kernel error: %s\n", cudaGetErrorString(errAsync));
 	}
 
-	cudaMemcpy(y, d_y, n*sizeof(float), cudaMemcpyDeviceToHost);
+	cudaMemcpy(R, d_R, size, cudaMemcpyDeviceToHost);
 
-	float maxError = 0.0f;
-	for (int i = 0; i < n; ++i) {
-		maxError = max(maxError, abs(y[i]-4.0f));
-	}
-		printf("Max error: %f\n", maxError);
+	printf("\n%f\n", R[0]);
+	// float maxError = 0.0f;
+	// for (int i = 0; i < n; ++i) {
+	// 	maxError = max(maxError, abs(y[i]-4.0f));
+	// }
+	
+	// printf("Max error: %f\n", maxError);
 
-	cudaFree(d_x);
-	cudaFree(d_y);
-	cudaFreeHost(x);
-	cudaFreeHost(y);
+	cudaFree(d_D);
+	cudaFree(d_R);
+	free(D);
+	free(R);
 }
