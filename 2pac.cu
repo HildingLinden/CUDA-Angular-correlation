@@ -20,8 +20,8 @@ void kernel(int n, double *x, double *y, unsigned int *DD, unsigned int *DR, uns
 		double floatResult;
 
 		for (int j = 0; j < n; j++) {
-			double alpha2 = x[j];
-			double beta2 = x[j+1];
+			double alpha2 = x[j*2];
+			double beta2 = x[j*2+1];
 
 			floatResult = acos(sin(beta1)*sin(beta2)+cos(beta1)*cos(beta2)*cos(alpha1-alpha2));
 			int resultIndex = floor(floatResult/0.25);
