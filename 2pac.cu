@@ -48,12 +48,16 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			double alpha2 = asc;
 			double delta2 = dec;
 
-			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
-			int resultIndex = floor(floatResult/0.25);
-			if (resultIndex >= 0) {
-				atomicAdd(&DR[resultIndex], 1);
+			if (alpha1 == alpha2 && delta1 == delta2) {
+				printf("Index %d of D and index %d of R contains the same coordinates\n", threadIndex, j);
 			} else {
-				printf("DR %d, %d %lf\n", threadIndex, j, floatResult);
+				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+				int resultIndex = floor(floatResult/0.25);
+				if (resultIndex >= 0) {
+					atomicAdd(&DD[resultIndex], 1);
+				} else {
+					printf("Result of DR incorrect");
+				}
 			}
 		}
 
@@ -71,12 +75,16 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			double alpha2 = asc;
 			double delta2 = dec;
 
-			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
-			int resultIndex = floor(floatResult/0.25);
-			if (resultIndex >= 0) {
-				atomicAdd(&RR[resultIndex], 1);
+			if (alpha1 == alpha2 && delta1 == delta2) {
+				printf("Index %d and index %d of R contains the same coordinates\n", threadIndex, j);
 			} else {
-				printf("RR %d %d %lf\n", threadIndex, j, floatResult);
+				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+				int resultIndex = floor(floatResult/0.25);
+				if (resultIndex >= 0) {
+					atomicAdd(&DD[resultIndex], 1);
+				} else {
+					printf("Result of RR incorrect");
+				}
 			}
 		}
 	}
