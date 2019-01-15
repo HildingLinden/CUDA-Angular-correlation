@@ -27,12 +27,16 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			double alpha2 = asc;
 			double delta2 = dec;
 
-			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
-			int resultIndex = floor(floatResult/0.25);
-			if (resultIndex >= 0) {
-				atomicAdd(&DD[resultIndex], 1);
+			if (alpha1 == alpha2 && delta1 == delta2) {
+				printf("Index %d and index %d of D contains the same coordinates\n", threadIndex, j);
 			} else {
-				printf("DD %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+				int resultIndex = floor(floatResult/0.25);
+				if (resultIndex >= 0) {
+					atomicAdd(&DD[resultIndex], 1);
+				} else {
+					printf("Result of DD incorrect");
+				}
 			}
 		}
 
@@ -49,7 +53,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			if (resultIndex >= 0) {
 				atomicAdd(&DR[resultIndex], 1);
 			} else {
-				printf("DR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+				printf("DR %d, %d %lf\n", threadIndex, j, floatResult);
 			}
 		}
 
@@ -60,7 +64,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 		alpha1 = asc;
 		delta1 = dec;
 
-		for (int j = 0; j < n; j++) {
+		for (int j = threadIndex+1; j < n; j++) {
 			double asc = r[j*2];
 			double dec = r[j*2+1];
 
@@ -72,7 +76,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			if (resultIndex >= 0) {
 				atomicAdd(&RR[resultIndex], 1);
 			} else {
-				//printf("RR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+				printf("RR %d %d %lf\n", threadIndex, j, floatResult);
 			}
 		}
 	}
@@ -179,12 +183,12 @@ int main(void) {
 	cudaMemcpy(h_DR, d_DR, resultSize, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
 
-	printf("\n");
+	/*printf("\n");
 	for (int i = 0; i < 720; i++) {
 		printf("DD[%d]: %d ", i, h_DD[i]);
 		printf("DR[%d]: %d ", i, h_DR[i]);
 		printf("RR[%d]: %d\n", i, h_RR[i]);
-	} 
+	}*/ 
 
 	cudaFree(d_D);
 	cudaFree(d_R);
