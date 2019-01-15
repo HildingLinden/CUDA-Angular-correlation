@@ -6,26 +6,74 @@
 // 2-point angular correlation
 
 __global__
-void kernel(int n, double *x, double *y, unsigned int *DD, unsigned int *DR, unsigned int *RR) {
-	int i = blockIdx.x*blockDim.x + threadIdx.x;
-	int pairIndex = i * 2;
+void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, unsigned int *RR) {
+	int threadIndex = blockIdx.x*blockDim.x + threadIdx.x;
 
-	if (pairIndex < n) {
-		double asc = x[pairIndex];
-		double dec = x[pairIndex+1];
+	if (threadIndex < n) {
+		// Right ascension and declination for the current element
+		double asc = d[threadIndex*2];
+		double dec = d[threadIndex*2+1];
 
+		// Alpha and delta values for the current element
 		double alpha1 = asc;
-		double beta1 = 90 - dec;
+		double delta1 = dec;
 
 		double floatResult;
+		// DD
+		for (int j = threadIndex+1; j < n; j++) {
+			double asc = d[j*2];
+			double dec = d[j*2+1];
+
+			double alpha2 = asc;
+			double delta2 = dec;
+
+			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+			int resultIndex = floor(floatResult/0.25);
+			if (resultIndex >= 0) {
+				atomicAdd(&DR[resultIndex], 1);
+			} else {
+				printf("DD %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+			}
+		}
+
+		// DR
+		for (int j = 0; j < n; j++) {
+			double asc = r[j*2];
+			double dec = r[j*2+1];
+
+			double alpha2 = asc;
+			double delta2 = dec;
+
+			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+			int resultIndex = floor(floatResult/0.25);
+			if (resultIndex >= 0) {
+				atomicAdd(&RR[resultIndex], 1);
+			} else {
+				printf("DR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+			}
+		}
+
+		// RR
+		asc = r[threadIndex*2];
+		dec = r[threadIndex*2+1];
+
+		alpha1 = asc;
+		delta1 = dec;
 
 		for (int j = 0; j < n; j++) {
-			double alpha2 = x[j*2];
-			double beta2 = x[j*2+1];
+			double asc = r[j*2];
+			double dec = r[j*2+1];
 
-			floatResult = acos(sin(beta1)*sin(beta2)+cos(beta1)*cos(beta2)*cos(alpha1-alpha2));
+			double alpha2 = asc;
+			double delta2 = dec;
+
+			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 			int resultIndex = floor(floatResult/0.25);
-			atomicAdd(&DD[resultIndex], 1);
+			if (resultIndex >= 0) {
+				atomicAdd(&DD[resultIndex], 1);
+			} else {
+				//printf("RR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
+			}
 		}
 	}
 }
@@ -131,13 +179,12 @@ int main(void) {
 	cudaMemcpy(h_DR, d_DR, resultSize, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
 
-	printf("\n%d %d %d\n", h_DD[0], h_DR[0], h_RR[0]);
-	// double maxError = 0.0f;
-	// for (int i = 0; i < n; ++i) {
-	// 	maxError = max(maxError, abs(y[i]-4.0f));
-	// }
-	
-	// printf("Max error: %f\n", maxError);
+	printf("\n");
+	for (int i = 0; i < 720; i++) {
+		printf("DD[%d]: %d ", i, h_DD[i]);
+		printf("DR[%d]: %d ", i, h_DR[i]);
+		printf("RR[%d]: %d\n", i, h_RR[i]);
+	} 
 
 	cudaFree(d_D);
 	cudaFree(d_R);
