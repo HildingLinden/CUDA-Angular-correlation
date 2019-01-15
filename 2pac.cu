@@ -30,7 +30,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 			int resultIndex = floor(floatResult/0.25);
 			if (resultIndex >= 0) {
-				atomicAdd(&DR[resultIndex], 1);
+				atomicAdd(&DD[resultIndex], 1);
 			} else {
 				printf("DD %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
 			}
@@ -47,7 +47,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 			int resultIndex = floor(floatResult/0.25);
 			if (resultIndex >= 0) {
-				atomicAdd(&RR[resultIndex], 1);
+				atomicAdd(&DR[resultIndex], 1);
 			} else {
 				printf("DR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
 			}
@@ -70,7 +70,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 			floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 			int resultIndex = floor(floatResult/0.25);
 			if (resultIndex >= 0) {
-				atomicAdd(&DD[resultIndex], 1);
+				atomicAdd(&RR[resultIndex], 1);
 			} else {
 				//printf("RR %lf %lf - %lf %lf %lf\n", d[threadIndex*2], d[threadIndex*2+1], d[j*2], d[j*2+1], floatResult);
 			}
