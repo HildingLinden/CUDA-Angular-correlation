@@ -54,7 +54,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 				int resultIndex = floor(floatResult/0.25);
 				if (resultIndex >= 0) {
-					atomicAdd(&DD[resultIndex], 1);
+					atomicAdd(&DR[resultIndex], 1);
 				} else {
 					printf("Result of DR incorrect");
 				}
@@ -81,7 +81,7 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 				int resultIndex = floor(floatResult/0.25);
 				if (resultIndex >= 0) {
-					atomicAdd(&DD[resultIndex], 1);
+					atomicAdd(&RR[resultIndex], 1);
 				} else {
 					printf("Result of RR incorrect");
 				}
@@ -191,12 +191,19 @@ int main(void) {
 	cudaMemcpy(h_DR, d_DR, resultSize, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
 
-	/*printf("\n");
+
+	// Computing the difference
+	double *result;
+	result = (double *)malloc(sizeof(double) * 720);
+	printf("\nResult:\n");
 	for (int i = 0; i < 720; i++) {
-		printf("DD[%d]: %d ", i, h_DD[i]);
-		printf("DR[%d]: %d ", i, h_DR[i]);
-		printf("RR[%d]: %d\n", i, h_RR[i]);
-	}*/ 
+		if(h_RR[i] == 0) {
+			result[i] = 0.0;
+		} else {
+			result[i] = (h_DD[i] - 2 * h_DR[i] + h_RR[i]) / (double)h_RR[i];
+		}
+		printf("%d: %lf\n", i, result[i]);
+	}
 
 	cudaFree(d_D);
 	cudaFree(d_R);
