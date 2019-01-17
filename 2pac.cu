@@ -130,7 +130,9 @@ int main(void) {
 		printf("  Memory clock rate: (MHz) %lf\n", props.memoryClockRate/1000.0);
 		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
 		printf("  Peak memory bandwith (GB/s): %f\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
-		printf("  Compute capability: %d.%d\n\n", props.major, props.minor);
+		printf("  Compute capability: %d.%d\n", props.major, props.minor);
+		printf("  Shared memory per block: %zd\n", props.sharedMemPerBlock);
+		printf("  Multiprocessor count: %d\n\n", props.multiProcessorCount);
 	}
 
 	// Reading both files and populating the arrays
