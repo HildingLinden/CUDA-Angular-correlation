@@ -6,8 +6,9 @@
 // 2-point angular correlation
 
 __global__
-void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, unsigned int *RR) {
+void DD_kernel(int n, double *d, unsigned int *DD) {
 	int threadIndex = blockIdx.x*blockDim.x + threadIdx.x;
+
 
 	if (threadIndex < n) {
 		// Right ascension and declination for the current element
@@ -33,57 +34,9 @@ void kernel(int n, double *d, double *r, unsigned int *DD, unsigned int *DR, uns
 				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
 				int resultIndex = floor(floatResult/0.25);
 				if (resultIndex >= 0) {
-					atomicAdd(&DD[resultIndex], 1);
+					//atomicAdd(&DD[resultIndex], 1);
 				} else {
 					printf("Result of DD incorrect");
-				}
-			}
-		}
-
-		// DR
-		for (int j = 0; j < n; j++) {
-			double asc = r[j*2];
-			double dec = r[j*2+1];
-
-			double alpha2 = asc;
-			double delta2 = dec;
-
-			if (alpha1 == alpha2 && delta1 == delta2) {
-				printf("Index %d of D and index %d of R contains the same coordinates\n", threadIndex, j);
-			} else {
-				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
-				int resultIndex = floor(floatResult/0.25);
-				if (resultIndex >= 0) {
-					atomicAdd(&DR[resultIndex], 1);
-				} else {
-					printf("Result of DR incorrect");
-				}
-			}
-		}
-
-		// RR
-		asc = r[threadIndex*2];
-		dec = r[threadIndex*2+1];
-
-		alpha1 = asc;
-		delta1 = dec;
-
-		for (int j = threadIndex+1; j < n; j++) {
-			double asc = r[j*2];
-			double dec = r[j*2+1];
-
-			double alpha2 = asc;
-			double delta2 = dec;
-
-			if (alpha1 == alpha2 && delta1 == delta2) {
-				printf("Index %d and index %d of R contains the same coordinates\n", threadIndex, j);
-			} else {
-				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
-				int resultIndex = floor(floatResult/0.25);
-				if (resultIndex >= 0) {
-					atomicAdd(&RR[resultIndex], 1);
-				} else {
-					printf("Result of RR incorrect");
 				}
 			}
 		}
@@ -194,18 +147,18 @@ int main(void) {
 	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
 
 
-	// Computing the difference
-	double *result;
-	result = (double *)malloc(sizeof(double) * 720);
-	printf("\nResult:\n");
-	for (int i = 0; i < 720; i++) {
-		if(h_RR[i] == 0) {
-			result[i] = 0.0;
-		} else {
-			result[i] = (h_DD[i] - 2 * h_DR[i] + h_RR[i]) / (double)h_RR[i];
-		}
-		printf("%d: %lf\n", i, result[i]);
-	}
+	// // Computing the difference
+	// double *result;
+	// result = (double *)malloc(sizeof(double) * 720);
+	// printf("\nResult:\n");
+	// for (int i = 0; i < 720; i++) {
+	// 	if(h_RR[i] == 0) {
+	// 		result[i] = 0.0;
+	// 	} else {
+	// 		result[i] = (h_DD[i] - 2 * h_DR[i] + h_RR[i]) / (double)h_RR[i];
+	// 	}
+	// 	printf("%d: %lf\n", i, result[i]);
+	// }
 
 	cudaFree(d_D);
 	cudaFree(d_R);
