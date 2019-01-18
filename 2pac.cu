@@ -1,3 +1,4 @@
+
 #include <stdio.h>
 #include <fstream>
 #include <iostream>
@@ -6,37 +7,36 @@
 // 2-point angular correlation
 
 __global__
-void DD_kernel(int n, double *d, unsigned int *DD) {
-	int threadIndex = blockIdx.x*blockDim.x + threadIdx.x;
+void DR_kernel(int n, double *d, double *r, unsigned int *DR) {
+	int blockId = blockIdx.y * gridDim.x + blockIdx.x;
+	int threadId = blockId * blockDim.x + threadIdx.x;
+
+	__shared__ float sharedR[512 * 2];
+
+	// Right ascension of R
+	sharedR[threadIdx.x * 2] = r[(blockIdx.y * 512 + threadIdx.x) * 2];
+	// Declination of R
+	sharedR[threadIdx.x * 2 + 1] = r[(blockIdx.y * 512 + threadIdx.x) * 2 + 1];
 
 
-	if (threadIndex < n) {
+	if (threadId < n) {
 		// Right ascension and declination for the current element
-		double asc = d[threadIndex*2];
-		double dec = d[threadIndex*2+1];
-
-		// Alpha and delta values for the current element
-		double alpha1 = asc;
-		double delta1 = dec;
+		double asc1 = d[threadId * 2];
+		double dec2 = d[threadId * 2 + 1];
 
 		double floatResult;
-		// DD
-		for (int j = threadIndex+1; j < n; j++) {
-			double asc = d[j*2];
-			double dec = d[j*2+1];
+		// DR
+		for (int j = 0; j < 512; j++) {
+			double asc2 = sharedR[j * 2];
+			double dec2 = sharedR[j * 2 + 1];
 
-			double alpha2 = asc;
-			double delta2 = dec;
-
-			if (alpha1 == alpha2 && delta1 == delta2) {
-				printf("Index %d and index %d of D contains the same coordinates\n", threadIndex, j);
-			} else {
-				floatResult = acos(sin(delta1) * sin(delta2) + cos(delta1) * cos(delta2) * cos(alpha1-alpha2));
+			if (asc1 != asc2 && dec1 != dec2) {
+				floatResult = acos(sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2));
 				int resultIndex = floor(floatResult/0.25);
 				if (resultIndex >= 0) {
-					//atomicAdd(&DD[resultIndex], 1);
+					atomicAdd(&DR[resultIndex], 1);
 				} else {
-					printf("Result of DD incorrect");
+					printf("Result of DR incorrect");
 				}
 			}
 		}
@@ -126,9 +126,10 @@ int main(void) {
 	cudaMemcpy(d_DR, h_DR, resultSize, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_RR, h_RR, resultSize, cudaMemcpyHostToDevice);
 
-	int blockSize = 256;
+	int blockSize = 512;
 	int gridSize = (nCoordinatePairs + blockSize - 1) / blockSize;
-	kernel<<<gridSize, blockSize>>>(nCoordinatePairs, d_D, d_R, d_DD, d_DR, d_RR);
+	dim3 gridSize2D(gridSize, gridSize);
+	DR_kernel<<<gridSize2D, blockSize>>>(nCoordinatePairs, d_D, d_R, d_DR);
 
 	cudaError_t errSync = cudaGetLastError();
 	cudaError_t errAsync = cudaDeviceSynchronize();
