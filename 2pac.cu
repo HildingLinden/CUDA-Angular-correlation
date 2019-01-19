@@ -22,7 +22,7 @@ void DR_kernel(int n, double *d, double *r, unsigned int *DR) {
 	if (threadId < n) {
 		// Right ascension and declination for the current element
 		double asc1 = d[threadId * 2];
-		double dec2 = d[threadId * 2 + 1];
+		double dec1 = d[threadId * 2 + 1];
 
 		double floatResult;
 		// DR
@@ -147,7 +147,9 @@ int main(void) {
 	cudaMemcpy(h_DR, d_DR, resultSize, cudaMemcpyDeviceToHost);
 	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
 
-
+	for (int i = 0; i < 20; i++) {
+		printf("%d: %d\n", i, h_DR[i]);
+	}
 	// // Computing the difference
 	// double *result;
 	// result = (double *)malloc(sizeof(double) * 720);
