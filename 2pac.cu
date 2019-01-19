@@ -4,40 +4,51 @@
 #include <iostream>
 #include <math.h>
 
-// 2-point angular correlation
+const int TILESIZE = 512;
 
+// 2-point angular correlation
 __global__
 void DR_kernel(int n, double *d, double *r, unsigned int *DR) {
-	int blockId = blockIdx.y * gridDim.x + blockIdx.x;
-	int threadId = blockId * blockDim.x + threadIdx.x;
+	// The thread id on the x-axis and y-axis
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * TILESIZE;
 
-	__shared__ float sharedR[512 * 2];
+	if (x < n) {
+		__shared__ unsigned int hist[720];
+		//__shared__ double sharedR[TILESIZE * 2 + 1];
 
-	// Right ascension of R
-	sharedR[threadIdx.x * 2] = r[(blockIdx.y * 512 + threadIdx.x) * 2];
-	// Declination of R
-	sharedR[threadIdx.x * 2 + 1] = r[(blockIdx.y * 512 + threadIdx.x) * 2 + 1];
+		// Right ascension of R
+		//sharedR[threadIdx.x * 2] = r[(y + threadIdx.x) * 2];
+		// Declination of R
+		//sharedR[threadIdx.x * 2 + 1] = r[(y + threadIdx.x) * 2 + 1];
 
-
-	if (threadId < n) {
 		// Right ascension and declination for the current element
-		double asc1 = d[threadId * 2];
-		double dec1 = d[threadId * 2 + 1];
+		double asc1 = d[x * 2];
+		double dec1 = d[x * 2 + 1];
 
-		double floatResult;
+		double doubleResult;
 		// DR
-		for (int j = 0; j < 512; j++) {
-			double asc2 = sharedR[j * 2];
-			double dec2 = sharedR[j * 2 + 1];
+		// n-y is the distance to the domain edge
+		int nElements = min(n-y, TILESIZE);
 
-			if (asc1 != asc2 && dec1 != dec2) {
-				floatResult = acos(sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2));
-				int resultIndex = floor(floatResult/0.25);
-				if (resultIndex >= 0) {
-					atomicAdd(&DR[resultIndex], 1);
-				} else {
-					printf("Result of DR incorrect");
-				}
+		//__syncthreads();
+
+		for (int j = 0; j < nElements; j++) {
+			double asc2 = r[y + j * 2];
+			double dec2 = r[y + j * 2 + 1];
+
+			if (fabs(asc1-asc2) > 0.0001f && fabs(dec1-dec2) > 0.0001f) {
+				doubleResult = acos(sin((float)dec1) * sin((float)dec2) + cos((float)dec1) * cos((float)dec2) * cos((float)asc1-(float)asc2));
+				int resultIndex = floor(doubleResult/0.25);
+				atomicAdd(&hist[resultIndex], 1);
+			}
+		}
+
+		__syncthreads();
+
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				atomicAdd(&DR[i], hist[i]);
 			}
 		}
 	}
@@ -88,6 +99,8 @@ int main(void) {
 		printf("  Multiprocessor count: %d\n\n", props.multiProcessorCount);
 	}
 
+	cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
+
 	// Reading both files and populating the arrays
 	double *h_D = readFile("data_100k_arcmin.txt");
 	double *h_R = readFile("flat_100k_arcmin.txt");
@@ -117,7 +130,7 @@ int main(void) {
 
 	// Allocating the result arrays on GPU
 	unsigned int *d_DD, *d_DR, *d_RR;
-	cudaMalloc((void **)&d_DD, resultSize);	
+	cudaMalloc((void **)&d_DD, resultSize);
 	cudaMalloc((void **)&d_DR, resultSize);
 	cudaMalloc((void **)&d_RR, resultSize);
 
@@ -126,7 +139,7 @@ int main(void) {
 	cudaMemcpy(d_DR, h_DR, resultSize, cudaMemcpyHostToDevice);
 	cudaMemcpy(d_RR, h_RR, resultSize, cudaMemcpyHostToDevice);
 
-	int blockSize = 512;
+	int blockSize = TILESIZE;
 	int gridSize = (nCoordinatePairs + blockSize - 1) / blockSize;
 	dim3 gridSize2D(gridSize, gridSize);
 	DR_kernel<<<gridSize2D, blockSize>>>(nCoordinatePairs, d_D, d_R, d_DR);
@@ -150,6 +163,7 @@ int main(void) {
 	for (int i = 0; i < 20; i++) {
 		printf("%d: %d\n", i, h_DR[i]);
 	}
+
 	// // Computing the difference
 	// double *result;
 	// result = (double *)malloc(sizeof(double) * 720);
