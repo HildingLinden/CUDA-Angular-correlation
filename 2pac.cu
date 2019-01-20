@@ -4,11 +4,13 @@
 #include <iostream>
 #include <math.h>
 
-const int ROWSPERTHREAD = 512;
-
 // 2-point angular correlation
-__global__
-void DR_kernel(int nCols, int nRows, float *d, double *r, unsigned int *DR) {
+
+const int ROWSPERTHREAD = 256;
+
+// Single-precision computation (is the precision enough?)
+__global__ void DR_kernel(int nCols, int nRows, float *D, double *R, int *DR) {
+
 	// The thread id on the x-axis and y-axis
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
 	int y = blockIdx.y * ROWSPERTHREAD;
@@ -16,7 +18,19 @@ void DR_kernel(int nCols, int nRows, float *d, double *r, unsigned int *DR) {
 	// blockIdx.y * ROWSPERTHREAD
 
 	if (x < nCols) {
-		__shared__ unsigned int hist[720];
+
+		// Shared histogram for the thread block
+		__shared__ int hist[720];
+
+		// Thread number zero will initialize the shared memory
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				hist[i] = 0;
+			}
+		}
+
+		__syncthreads();
+
 		//__shared__ double sharedR[ROWSPERTHREAD * 2 + 1];
 
 		// Right ascension of R
@@ -24,32 +38,145 @@ void DR_kernel(int nCols, int nRows, float *d, double *r, unsigned int *DR) {
 		// Declination of R
 		//sharedR[threadIdx.x * 2 + 1] = r[(y + threadIdx.x) * 2 + 1];
 
-		// Right ascension and declination for the current element
-		float asc1 = d[x * 2];
-		float dec1 = d[x * 2 + 1];
+		// Right ascension and declination for the current element in D
+		float asc1 = D[x * 2];
+		float dec1 = D[x * 2 + 1];
 
-		float decimalResult;
-		// n-y is the distance to the domain edge
+		// Each thread calculates ROWSPERTHREAD elements of R or however many there are left to calculate
 		int nElements = min(nRows-y, ROWSPERTHREAD);
-
-		//__syncthreads();
+		float decimalResult;
 
 		for (int j = 0; j < nElements; j++) {
-			double asc2 = r[y + j * 2];
-			double dec2 = r[y + j * 2 + 1];
+			double asc2 = R[y + j * 2];
+			double dec2 = R[y + j * 2 + 1];
 
-			if (fabs(asc1-asc2) > 0.0001f && fabs(dec1-dec2) > 0.0001f) {
-				decimalResult = acos(sinf(dec1) * sin((float)dec2) + cos(dec1) * cos((float)dec2) * cos(asc1-(float)asc2));
+			if (fabs((double)asc1-asc2) > 0.0000001 || fabs((double)dec1-dec2) > 0.0000001) {
+				decimalResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-(float)asc2));
 				int resultIndex = floor(decimalResult/0.25);
 				atomicAdd(&hist[resultIndex], 1);
+			} else {
+				printf("Coordinate %d of D and %d of R are identical\n", x, y+j);
 			}
 		}
 
 		__syncthreads();
 
+		// Thread number zero will write the shared histogram to global device memory
 		if (threadIdx.x == 0) {
 			for (int i = 0; i < 720; i++) {
 				atomicAdd(&DR[i], hist[i]);
+			}
+		}
+	}
+}
+
+// All computation in single-precision
+__global__ void DD_kernel(int n, float *D, int *DD) {
+
+	// The thread id on the x-axis and y-axis
+	//int x = blockIdx.y * ROWSPERTHREAD + blockIdx.x * blockDim.x + threadIdx.x;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * ROWSPERTHREAD;
+
+	if (x < n && y + ROWSPERTHREAD > x) {
+
+		// Shared histogram for the thread block
+		__shared__ int hist[720];
+
+		// Thread number zero will initialize the shared memory
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				hist[i] = 0;
+			}
+		}
+
+		__syncthreads();
+
+		// Right ascension and declination for the current element in D
+		float asc1 = D[x * 2];
+		float dec1 = D[x * 2 + 1];
+
+		int offset = max(x-y+1, 0);
+
+		// Each thread calculates ROWSPERTHREAD elements of D or however many there are left to calculate
+		int nElements = min(n-y, ROWSPERTHREAD);
+
+		float decimalResult;
+		for (int j = offset; j < nElements; j++) {
+			float asc2 = D[(y + j) * 2];
+			float dec2 = D[(y + j) * 2 + 1];
+
+			if (fabs(asc1-asc2) > 0.0000001 || fabs(dec1-dec2) > 0.0000001) {
+				decimalResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
+				int resultIndex = floor(decimalResult/0.25);
+				atomicAdd(&hist[resultIndex], 1);
+			} else {
+				printf("%d: %f - %f and %d: %f - %f \n", x, D[x*2], D[x*2+1], y+j, D[(y+j)*2], D[(y+j)*2+1]);
+			}
+		}
+
+		__syncthreads();
+
+		// Thread number zero will write the shared histogram to global device memory
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				atomicAdd(&DD[i], hist[i]);
+			}
+		}
+	}
+}
+
+// All computation in double-precision
+__global__ void RR_kernel(int n, double *R, int *RR) {
+
+	// The thread id on the x-axis and y-axis
+	//int x = blockIdx.y * ROWSPERTHREAD + blockIdx.x * blockDim.x + threadIdx.x;
+	int x = blockIdx.x * blockDim.x + threadIdx.x;
+	int y = blockIdx.y * ROWSPERTHREAD;
+
+	if (x < n && y + ROWSPERTHREAD > x) {
+
+		// Shared histogram for the thread block
+		__shared__ int hist[720];
+
+		// Thread number zero will initialize the shared memory
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				hist[i] = 0;
+			}
+		}
+
+		__syncthreads();
+
+		// Right ascension and declination for the current element in D
+		double asc1 = R[x * 2];
+		double dec1 = R[x * 2 + 1];
+
+		int offset = max(x-y+1, 0);
+
+		// Each thread calculates ROWSPERTHREAD elements of D or however many there are left to calculate
+		int nElements = min(n-y, ROWSPERTHREAD);
+
+		double decimalResult;
+		for (int j = offset; j < nElements; j++) {
+			double asc2 = R[(y + j) * 2];
+			double dec2 = R[(y + j) * 2 + 1];
+
+			if (fabs(asc1-asc2) > 0.0000001 || fabs(dec1-dec2) > 0.0000001) {
+				decimalResult = acos(sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2));
+				int resultIndex = floor(decimalResult/0.25);
+				atomicAdd(&hist[resultIndex], 1);
+			} else {
+				printf("%d: %lf - %lf and %d: %lf - %lf \n", x, R[x*2], R[x*2+1], y+j, R[(y+j)*2], R[(y+j)*2+1]);
+			}
+		}
+
+		__syncthreads();
+
+		// Thread number zero will write the shared histogram to global device memory
+		if (threadIdx.x == 0) {
+			for (int i = 0; i < 720; i++) {
+				atomicAdd(&RR[i], hist[i]);
 			}
 		}
 	}
@@ -140,29 +267,38 @@ int main(void) {
 
 
 	// Allocating and zero-initializing the result arrays on host
-	unsigned int *h_DD, *h_DR, *h_RR;
-	h_DD = (unsigned int *)calloc(720, sizeof(unsigned int));
-	h_DR = (unsigned int *)calloc(720, sizeof(unsigned int));
-	h_RR = (unsigned int *)calloc(720, sizeof(unsigned int));
+	int *h_DD, *h_DR, *h_RR;
+	h_DD = (int *)calloc(720, sizeof(int));
+	h_DR = (int *)calloc(720, sizeof(int));
+	h_RR = (int *)calloc(720, sizeof(int));
 
 	// Allocating the result arrays on device
-	unsigned int *d_DD, *d_DR, *d_RR;
-	cudaMalloc((void **)&d_DD, 720 * sizeof(unsigned int));
-	cudaMalloc((void **)&d_DR, 720 * sizeof(unsigned int));
-	cudaMalloc((void **)&d_RR, 720 * sizeof(unsigned int));
+	int *d_DD, *d_DR, *d_RR;
+	cudaMalloc((void **)&d_DD, 720 * sizeof(int));
+	cudaMalloc((void **)&d_DR, 720 * sizeof(int));
+	cudaMalloc((void **)&d_RR, 720 * sizeof(int));
 
 	// Copying the zero-initialized arrays to the GPU
-	cudaMemcpy(d_DD, h_DD, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_DR, h_DR, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_RR, h_RR, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_DD, h_DD, 720 * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_DR, h_DR, 720 * sizeof(int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_RR, h_RR, 720 * sizeof(int), cudaMemcpyHostToDevice);
 
-	// Calculating sizes and launching kernel
+	// Calculating sizes and launching kernels
 	int blockSize = 256;
-	int gridSizeX = (nCoordinatePairsD/2 + blockSize - 1) / blockSize;
-	int gridSizeY = (nCoordinatePairsR/2 + blockSize - 1) / blockSize;
-	dim3 gridSize2D(gridSizeX, gridSizeY);
 
+	int gridSizeX = (nCoordinatePairsD + blockSize - 1) / blockSize;
+	int gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+	dim3 gridSize2D(gridSizeX, gridSizeY);
 	DR_kernel<<<gridSize2D, blockSize>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
+
+	gridSizeY = (nCoordinatePairsD + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+	dim3 DDGridSize2D(gridSizeX, gridSizeY);
+	DD_kernel<<<DDGridSize2D, blockSize>>>(nCoordinatePairsD, d_D, d_DD);
+
+	gridSizeX = (nCoordinatePairsR + blockSize - 1) / blockSize;
+	gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+	dim3 RRGridSize2D(gridSizeX, gridSizeY);
+	RR_kernel<<<RRGridSize2D, blockSize>>>(nCoordinatePairsR, d_R, d_RR);
 
 	// Checking for errors
 	cudaError_t errSync = cudaGetLastError();
@@ -177,13 +313,18 @@ int main(void) {
 
 	// Copying the result from device to host
 	// cudaMemcpy has an implicit barrier
-	cudaMemcpy(h_DD, d_DD, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_DR, d_DR, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_RR, d_RR, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_DD, d_DD, 720 * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_DR, d_DR, 720 * sizeof(int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_RR, d_RR, 720 * sizeof(int), cudaMemcpyDeviceToHost);
 
+	printf("\n");
+	long long total = 0;
 	for (int i = 0; i < 20; i++) {
 		printf("%d: %u\n", i, h_DR[i]);
+		total += h_DR[i];
 	}
+
+	printf("\nTotal: %lld\n", total);
 
 	// // Computing the difference
 	// double *result;
