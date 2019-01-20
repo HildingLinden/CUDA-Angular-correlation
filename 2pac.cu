@@ -4,18 +4,20 @@
 #include <iostream>
 #include <math.h>
 
-const int TILESIZE = 256;
+const int ROWSPERTHREAD = 512;
 
 // 2-point angular correlation
 __global__
-void DR_kernel(int n, float *d, double *r, unsigned int *DR) {
+void DR_kernel(int nCols, int nRows, float *d, double *r, unsigned int *DR) {
 	// The thread id on the x-axis and y-axis
 	int x = blockIdx.x * blockDim.x + threadIdx.x;
-	int y = blockIdx.y * TILESIZE;
+	int y = blockIdx.y * ROWSPERTHREAD;
 
-	if (x < n) {
+	// blockIdx.y * ROWSPERTHREAD
+
+	if (x < nCols) {
 		__shared__ unsigned int hist[720];
-		//__shared__ double sharedR[TILESIZE * 2 + 1];
+		//__shared__ double sharedR[ROWSPERTHREAD * 2 + 1];
 
 		// Right ascension of R
 		//sharedR[threadIdx.x * 2] = r[(y + threadIdx.x) * 2];
@@ -27,9 +29,8 @@ void DR_kernel(int n, float *d, double *r, unsigned int *DR) {
 		float dec1 = d[x * 2 + 1];
 
 		float decimalResult;
-		// DR
 		// n-y is the distance to the domain edge
-		int nElements = min(n-y, TILESIZE);
+		int nElements = min(nRows-y, ROWSPERTHREAD);
 
 		//__syncthreads();
 
@@ -38,7 +39,7 @@ void DR_kernel(int n, float *d, double *r, unsigned int *DR) {
 			double dec2 = r[y + j * 2 + 1];
 
 			if (fabs(asc1-asc2) > 0.0001f && fabs(dec1-dec2) > 0.0001f) {
-				decimalResult = acos(sin(dec1) * sin((float)dec2) + cos(dec1) * cos((float)dec2) * cos(asc1-(float)asc2));
+				decimalResult = acos(sinf(dec1) * sin((float)dec2) + cos(dec1) * cos((float)dec2) * cos(asc1-(float)asc2));
 				int resultIndex = floor(decimalResult/0.25);
 				atomicAdd(&hist[resultIndex], 1);
 			}
@@ -73,89 +74,97 @@ int main(void) {
 
 	//cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeEightByte);
 
-	// Reading both files and populating the arrays
-	// Read file
-	std::ifstream infile1("data_100k_arcmin.txt");
+
+	// Read real data file
+	std::ifstream infileD("data_100k_arcmin.txt");
 
 	// Get amount of coordinate pairs
-	int nCoordinatePairs;
-	infile1 >> nCoordinatePairs;
-	printf("Found %d coordinate pairs in data\n", nCoordinatePairs);
+	int nCoordinatePairsD;
+	infileD >> nCoordinatePairsD;
+	printf("Found %d coordinate pairs in data\n", nCoordinatePairsD);
 
-	// Allocate memory for all pairs
-	float *h_D = (float *)malloc(sizeof(float) * 2 * nCoordinatePairs);
+	// Allocate memory for real data on host
+	float *h_D = (float *)malloc(nCoordinatePairsD * 2 * sizeof(float));
 
-	// Initialize the array of pairs
-	float asc1, dec1;
+	// Read synthetic data file
+	std::ifstream infileR("flat_100k_arcmin.txt");
+
+	// Get amount of coordinate pairs
+	int nCoordinatePairsR;
+	infileR >> nCoordinatePairsR;
+	printf("Found %d coordinate pairs in flat\n", nCoordinatePairsR);
+
+	// Allocate memory for synthetic data on host
+	double *h_R = (double *)malloc(nCoordinatePairsR * 2 * sizeof(double));
+
+	if (h_D == NULL || h_R == NULL) printf("Allocating memory on host failed");
+
+
 	int index = 0;
-	while (infile1 >> asc1 >> dec1) {
-		if (index < nCoordinatePairs * 2) {
-			h_D[index++] = asc1;
-			h_D[index++] = dec1;
+
+	// Initialize data
+	float ascD, decD;
+	while (infileD >> ascD >> decD) {
+		if (index < nCoordinatePairsD * 2) {
+			h_D[index++] = ascD;
+			h_D[index++] = decD;
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in data\n");
 			exit(1);
 		}
 	}
 
-	// Read file
-	std::ifstream infile2("flat_100k_arcmin.txt");
-
-	// Get amount of coordinate pairs
-	int nCoordinatePairs2;
-	infile2 >> nCoordinatePairs2;
-	printf("Found %d coordinate pairs in flat\n", nCoordinatePairs2);
-
-	// Allocate memory for all pairs
-	double *h_R = (double *)malloc(sizeof(double) * 2 * nCoordinatePairs2);
-
-	// Initialize the array of pairs
-	double asc2, dec2;
+	// Initialize synthetic
+	double ascR, decR;
 	index = 0;
-	while (infile2 >> asc2 >> dec2) {
-		if (index < nCoordinatePairs2 * 2) {
-			h_R[index++] = asc2;
-			h_R[index++] = dec2;
+	while (infileR >> ascR >> decR) {
+		if (index < nCoordinatePairsR * 2) {
+			h_R[index++] = ascR;
+			h_R[index++] = decR;
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
 			exit(1);
 		}
 	}
 
-	// Allocating and copying the input data to GPU
+
+	// Allocating and copying the input data to device
 	float *d_D;
 	double *d_R;
 
-	cudaMalloc((void **)&d_D, nCoordinatePairs * 2 * sizeof(float));
-	cudaMalloc((void **)&d_R, nCoordinatePairs * 2 * sizeof(double));
+	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float));
+	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(double));
 
-	cudaMemcpy(d_D, h_D, nCoordinatePairs * 2 * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_R, h_R, nCoordinatePairs * 2 * sizeof(double), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_D, h_D, nCoordinatePairsD * 2 * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(double), cudaMemcpyHostToDevice);
 
-	int resultSize = 720 * sizeof(unsigned int);
 
-	// Allocating and zero-initializing the result arrays on CPU
+	// Allocating and zero-initializing the result arrays on host
 	unsigned int *h_DD, *h_DR, *h_RR;
-	h_DD = (unsigned int *)calloc(resultSize, sizeof(unsigned int));
-	h_DR = (unsigned int *)calloc(resultSize, sizeof(unsigned int));
-	h_RR = (unsigned int *)calloc(resultSize, sizeof(unsigned int));
+	h_DD = (unsigned int *)calloc(720, sizeof(unsigned int));
+	h_DR = (unsigned int *)calloc(720, sizeof(unsigned int));
+	h_RR = (unsigned int *)calloc(720, sizeof(unsigned int));
 
-	// Allocating the result arrays on GPU
+	// Allocating the result arrays on device
 	unsigned int *d_DD, *d_DR, *d_RR;
-	cudaMalloc((void **)&d_DD, resultSize);
-	cudaMalloc((void **)&d_DR, resultSize);
-	cudaMalloc((void **)&d_RR, resultSize);
+	cudaMalloc((void **)&d_DD, 720 * sizeof(unsigned int));
+	cudaMalloc((void **)&d_DR, 720 * sizeof(unsigned int));
+	cudaMalloc((void **)&d_RR, 720 * sizeof(unsigned int));
 
 	// Copying the zero-initialized arrays to the GPU
-	cudaMemcpy(d_DD, h_DD, resultSize, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_DR, h_DR, resultSize, cudaMemcpyHostToDevice);
-	cudaMemcpy(d_RR, h_RR, resultSize, cudaMemcpyHostToDevice);
+	cudaMemcpy(d_DD, h_DD, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_DR, h_DR, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
+	cudaMemcpy(d_RR, h_RR, 720 * sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-	int blockSize = TILESIZE;
-	int gridSize = (nCoordinatePairs/4 + blockSize - 1) / blockSize;
-	dim3 gridSize2D(gridSize, gridSize);
-	DR_kernel<<<gridSize2D, blockSize>>>(nCoordinatePairs/4, d_D, d_R, d_DR);
+	// Calculating sizes and launching kernel
+	int blockSize = 256;
+	int gridSizeX = (nCoordinatePairsD/2 + blockSize - 1) / blockSize;
+	int gridSizeY = (nCoordinatePairsR/2 + blockSize - 1) / blockSize;
+	dim3 gridSize2D(gridSizeX, gridSizeY);
 
+	DR_kernel<<<gridSize2D, blockSize>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
+
+	// Checking for errors
 	cudaError_t errSync = cudaGetLastError();
 	cudaError_t errAsync = cudaDeviceSynchronize();
 
@@ -166,14 +175,14 @@ int main(void) {
 		printf("Async kernel error: %s\n", cudaGetErrorString(errAsync));
 	}
 
+	// Copying the result from device to host
 	// cudaMemcpy has an implicit barrier
-	// Copying back the result
-	cudaMemcpy(h_DD, d_DD, resultSize, cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_DR, d_DR, resultSize, cudaMemcpyDeviceToHost);
-	cudaMemcpy(h_RR, d_RR, resultSize, cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_DD, d_DD, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_DR, d_DR, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_RR, d_RR, 720 * sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
 	for (int i = 0; i < 20; i++) {
-		printf("%d: %d\n", i, h_DR[i]);
+		printf("%d: %u\n", i, h_DR[i]);
 	}
 
 	// // Computing the difference
