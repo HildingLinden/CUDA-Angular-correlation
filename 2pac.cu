@@ -54,8 +54,6 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, double *R, int *DR) {
 				decimalResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-(float)asc2));
 				int resultIndex = floor(decimalResult/0.25);
 				atomicAdd(&hist[resultIndex], 1);
-			} else {
-				printf("Coordinate %d of D and %d of R are identical\n", x, y+j);
 			}
 		}
 
@@ -110,8 +108,6 @@ __global__ void DD_kernel(int n, float *D, int *DD) {
 				decimalResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
 				int resultIndex = floor(decimalResult/0.25);
 				atomicAdd(&hist[resultIndex], 1);
-			} else {
-				printf("%d: %f - %f and %d: %f - %f \n", x, D[x*2], D[x*2+1], y+j, D[(y+j)*2], D[(y+j)*2+1]);
 			}
 		}
 
@@ -166,8 +162,6 @@ __global__ void RR_kernel(int n, double *R, int *RR) {
 				decimalResult = acos(sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2));
 				int resultIndex = floor(decimalResult/0.25);
 				atomicAdd(&hist[resultIndex], 1);
-			} else {
-				printf("%d: %lf - %lf and %d: %lf - %lf \n", x, R[x*2], R[x*2+1], y+j, R[(y+j)*2], R[(y+j)*2+1]);
 			}
 		}
 
