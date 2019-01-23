@@ -32,7 +32,7 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 
 		__syncthreads();
 
-		// Right ascension and declination in arc minutes for the current column
+		// Right ascension and declination in degrees for the current column
 		float asc1 = D[x * 2];
 		float dec1 = D[x * 2 + 1];
 
@@ -44,7 +44,7 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 		int nElements = min(nRows-y, ROWSPERTHREAD);
 		
 		for (int j = 0; j < nElements; j++) {
-			// Right ascension and declination in arc minutes for the current row
+			// Right ascension and declination degrees for the current row
 			float asc2 = R[y + j * 2];
 			float dec2 = R[y + j * 2 + 1];
 
@@ -54,10 +54,12 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 
 			// Check if the coordinates are identical
 			if (fabsf(alpha1 - alpha2) > 0.0000001f || fabsf(delta1 - delta2) > 0.0000001f) {
-				// Compute the angle
-				float decimalResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				// Compute the angle in radians
+				float radianResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				// Convert to degrees
+				float degreeResult = radianResult * 180/3.14159f;
 				// Compute the bin
-				int resultIndex = floor(decimalResult/0.25f);
+				int resultIndex = floor(degreeResult * 4.0f);
 				// Increment the bin in the shared histogram
 				atomicAdd(&sHist[resultIndex], 1);
 			} else {
@@ -101,7 +103,7 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 
 		__syncthreads();
 
-		// Right ascension and declination in arc minutes for the current column
+		// Right ascension and declination in degrees for the current column
 		float asc1 = arr[x * 2];
 		float dec1 = arr[x * 2 + 1];
 
@@ -116,7 +118,7 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 		int nElements = min(nRows-y, ROWSPERTHREAD);
 		
 		for (int j = offset; j < nElements; j++) {
-			// Right ascension and declination in arc minutes for the current row
+			// Right ascension and declination in degrees for the current row
 			float asc2 = arr[y + j * 2];
 			float dec2 = arr[y + j * 2 + 1];
 
@@ -126,10 +128,12 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 
 			// Check if the coordinates are identical
 			if (fabsf(alpha1 - alpha2) > 0.0000001f || fabsf(delta1 - delta2) > 0.0000001f) {
-				// Compute the angle
-				float decimalResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				// Compute the angle in radians
+				float radianResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				// Convert to degrees
+				float degreeResult = radianResult * 180/3.14159f;
 				// Compute the bin
-				int resultIndex = floor(decimalResult/0.25f);
+				int resultIndex = floor(degreeResult * 4.0f);
 				// Increment the bin in the shared histogram
 				atomicAdd(&sHist[resultIndex], 2);
 			} else {
@@ -304,11 +308,11 @@ int main(void) {
 	printf("RR: %lld\n", totalRR);
 
 	// Computing the difference
-	double result[720];
+	//double result[720];
 	printf("\nResult:\n");
-	for (int i = 0; i < 7; i++) {
-		printf("%d: DD: %llu, DR: %llu, RR: %llu\n", i, h_DD[i], h_DR[i], h_RR[i]);
-		printf("  %lf\n", (double)((double)h_DD[i] - 2 * (double)h_DR[i] + (double)h_RR[i]) / (double)h_RR[i]);
+	for (int i = 0; i < 5; i++) {
+		//printf("%d: DD: %llu, DR: %llu, RR: %llu\n", i, h_DD[i], h_DR[i], h_RR[i]);
+		printf("  %lf\n", ((double)h_DD[i] - 2.0 * (double)h_DR[i] + (double)h_RR[i]) / (double)h_RR[i]);
 		// if(h_RR[i] == 0) {
 		// 	result[i] = 0.0;
 		// } else {
