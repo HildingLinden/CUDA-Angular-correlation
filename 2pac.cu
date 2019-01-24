@@ -36,10 +36,6 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 		float asc1 = D[x * 2];
 		float dec1 = D[x * 2 + 1];
 
-		// Alpha and delta
-		float alpha1 = asc1;
-		float delta1 = 90 - dec1;
-
 		// The amount of rows to be calculated is ROWSPERTHREAD or rows left in the domain, whichever is smaller
 		int nElements = min(nRows-y, ROWSPERTHREAD);
 		
@@ -48,14 +44,10 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 			float asc2 = R[y + j * 2];
 			float dec2 = R[y + j * 2 + 1];
 
-			// Alpha and delta
-			float alpha2 = asc2;
-			float delta2 = 90 - dec2;
-
 			// Check if the coordinates are identical
-			if (fabsf(alpha1 - alpha2) > 0.0000001f || fabsf(delta1 - delta2) > 0.0000001f) {
+			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
 				// Compute the angle in radians
-				float radianResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
 				// Convert to degrees
 				float degreeResult = radianResult * 180/3.14159f;
 				// Compute the bin
@@ -107,10 +99,6 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 		float asc1 = arr[x * 2];
 		float dec1 = arr[x * 2 + 1];
 
-		// Alpha and delta
-		float alpha1 = asc1;
-		float delta1 = 90 - dec1;
-
 		// Offset is at which row to start computing
 		int offset = max(x-y+1, 0);
 
@@ -122,14 +110,10 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 			float asc2 = arr[y + j * 2];
 			float dec2 = arr[y + j * 2 + 1];
 
-			// Alpha and delta
-			float alpha2 = asc2;
-			float delta2 = 90 - dec2;
-
 			// Check if the coordinates are identical
-			if (fabsf(alpha1 - alpha2) > 0.0000001f || fabsf(delta1 - delta2) > 0.0000001f) {
+			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
 				// Compute the angle in radians
-				float radianResult = acosf(sinf(delta1) * sinf(delta2) + cosf(delta1) * cosf(delta2) * cosf(alpha1-alpha2));
+				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
 				// Convert to degrees
 				float degreeResult = radianResult * 180/3.14159f;
 				// Compute the bin
@@ -213,8 +197,6 @@ int main(void) {
 	unsigned long long int *h_DD, *h_DR, *h_RR;
 	unsigned long long int *d_DD, *d_DR, *d_RR;
 
-	printf("\nRunning host side on %d threads\n", omp_get_num_threads());
-
 	// Info about the GPU
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
@@ -232,8 +214,8 @@ int main(void) {
 	}
 
 	// Allocating and copying the input data to device
-	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float));
-	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
+	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float) * 100);
+	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float) * 100);
 
 	cudaMemcpy(d_D, h_D, nCoordinatePairsD * 2 * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
@@ -310,7 +292,7 @@ int main(void) {
 	// Computing the difference
 	//double result[720];
 	printf("\nResult:\n");
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 10; i++) {
 		//printf("%d: DD: %llu, DR: %llu, RR: %llu\n", i, h_DD[i], h_DR[i], h_RR[i]);
 		printf("  %lf\n", ((double)h_DD[i] - 2.0 * (double)h_DR[i] + (double)h_RR[i]) / (double)h_RR[i]);
 		// if(h_RR[i] == 0) {
