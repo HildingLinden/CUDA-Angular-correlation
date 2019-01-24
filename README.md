@@ -36,7 +36,7 @@ Synchronize the threads
 Get the right ascension and declination of the first set
 Get the right ascension and declination of the second set
 Check that the difference between the two coordinate pairs are large than some epsilon
-Compute the distance between the pairs in radians using the formula arccos(sin(dec<sub>1</sub>) * sin(dec<sub>2</sub>) + cos(dec<sub>1</sub>) * cos(dec<sub>2</sub>) * cos(asc<sub>1</sub>-asc<sub>2</sub>))
+Compute the distance between the pairs in radians using the formula **arccos(sin(dec<sub>1</sub>) * sin(dec<sub>2</sub>) + cos(dec<sub>1</sub>) * cos(dec<sub>2</sub>) * cos(asc<sub>1</sub>-asc<sub>2</sub>))**
 Convert the distance to degrees
 Compute the histogram bin
 Increment the local histogram bin
@@ -49,5 +49,5 @@ Check for synchronous and asynchronous errors on the device
 Copy the histograms to the host
 Increment the first bin of DD and RR for every element in D and R, respectively.
 Calculate the total number of results in the histograms, they should add up to 10 billion.
-Calculate the omega value of the bins in the histograms using the formula (DD<sub>i</sub> - 2 * DR<sub>i</sub> + RR<sub>i</sub>) / RR<sub>i</sub>
+Calculate the omega value of the bins in the histograms using the formula **(DD<sub>i</sub> - 2 * DR<sub>i</sub> + RR<sub>i</sub>) / RR<sub>i</sub>**
 Free memory on host and device (This is not strictly necessary)
