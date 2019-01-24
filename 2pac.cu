@@ -4,6 +4,7 @@
 #include <iostream>
 #include <math.h>
 #include <omp.h>
+#include <time.h>
 
 // 2-point angular correlation
 
@@ -140,6 +141,27 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 }
 
 int main(void) {
+	long seconds, ns;
+	timespec start, end;
+	float time1, time2, time3, time4;
+
+	// Info about the GPU
+	int deviceCount;
+	cudaGetDeviceCount(&deviceCount);
+	for (int i = 0; i < deviceCount; i++) {
+		cudaDeviceProp props;
+		cudaGetDeviceProperties(&props, i);
+		printf("\nDevice nr.: %d\n", i);
+		printf("  Device name: %s\n", props.name);
+		printf("  Memory clock rate: (MHz) %lf\n", props.memoryClockRate/1000.0);
+		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
+		printf("  Peak memory bandwith (GB/s): %f\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
+		printf("  Compute capability: %d.%d\n", props.major, props.minor);
+		printf("  Shared memory per block: %zd\n", props.sharedMemPerBlock);
+		printf("  Multiprocessor count: %d\n\n", props.multiProcessorCount);
+	}
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	
 	// Read real data file
 	std::ifstream infileD("data_100k_arcmin.txt");
@@ -192,48 +214,38 @@ int main(void) {
 		}
 	}
 
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	seconds = end.tv_sec - start.tv_sec; 
+	ns = end.tv_nsec - start.tv_nsec;
+
+	if (start.tv_nsec > end.tv_nsec) {
+	--seconds; 
+	ns += 1000000000; 
+    } 
+	time1 = ns/1000000.0f;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
 	float *d_D;
 	float *d_R;
 	unsigned long long int *h_DD, *h_DR, *h_RR;
 	unsigned long long int *d_DD, *d_DR, *d_RR;
 
-	// Info about the GPU
-	int deviceCount;
-	cudaGetDeviceCount(&deviceCount);
-	for (int i = 0; i < deviceCount; i++) {
-		cudaDeviceProp props;
-		cudaGetDeviceProperties(&props, i);
-		printf("\nDevice nr.: %d\n", i);
-		printf("  Device name: %s\n", props.name);
-		printf("  Memory clock rate: (MHz) %lf\n", props.memoryClockRate/1000.0);
-		printf("  Memory bus width (bits): %d\n", props.memoryBusWidth);
-		printf("  Peak memory bandwith (GB/s): %f\n", 2.0*props.memoryClockRate*(props.memoryBusWidth/8)/1.0e6);
-		printf("  Compute capability: %d.%d\n", props.major, props.minor);
-		printf("  Shared memory per block: %zd\n", props.sharedMemPerBlock);
-		printf("  Multiprocessor count: %d\n\n", props.multiProcessorCount);
-	}
-
 	// Allocating and copying the input data to device
-	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float) * 100);
-	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float) * 100);
+	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float));
+	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
 
 	cudaMemcpy(d_D, h_D, nCoordinatePairsD * 2 * sizeof(float), cudaMemcpyHostToDevice);
 	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
 
-	// Allocating and zero-initializing the result arrays on host
-	h_DD = (unsigned long long int *)calloc(720, sizeof(unsigned long long int));
-	h_DR = (unsigned long long int *)calloc(720, sizeof(unsigned long long int));
-	h_RR = (unsigned long long int *)calloc(720, sizeof(unsigned long long int));
-
-	// Allocating the result arrays on device
+	// Allocating the histograms arrays on device
 	cudaMalloc((void **)&d_DD, 720 * sizeof(unsigned long long int));
 	cudaMalloc((void **)&d_DR, 720 * sizeof(unsigned long long int));
 	cudaMalloc((void **)&d_RR, 720 * sizeof(unsigned long long int));
 
-	// Copying the zero-initialized arrays to the GPU
-	cudaMemcpy(d_DD, h_DD, 720 * sizeof(unsigned long long int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_DR, h_DR, 720 * sizeof(unsigned long long int), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_RR, h_RR, 720 * sizeof(unsigned long long int), cudaMemcpyHostToDevice);
+	// Setting all elements of the histograms to zero
+	cudaMemset(d_DD, 0, 720 * sizeof(unsigned long long int));
+	cudaMemset(d_DR, 0, 720 * sizeof(unsigned long long int));
+	cudaMemset(d_RR, 0, 720 * sizeof(unsigned long long int));
 
 	// Device kernel for DR
 	int gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
@@ -252,6 +264,22 @@ int main(void) {
 	dim3 RRGridSize2D(gridSizeX, gridSizeY);
 	DD_or_RR_kernel<<<RRGridSize2D, BLOCKSIZE>>>(nCoordinatePairsR, nCoordinatePairsR, d_R, d_RR);
 
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	seconds = end.tv_sec - start.tv_sec; 
+	ns = end.tv_nsec - start.tv_nsec;
+
+	if (start.tv_nsec > end.tv_nsec) {
+	--seconds; 
+	ns += 1000000000; 
+    } 
+	time2 = ns/1000000.0f;
+	clock_gettime(CLOCK_MONOTONIC, &start);
+
+	// Allocating histograms on host
+	h_DD = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
+	h_DR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
+	h_RR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
+
 	// Checking for errors
 	cudaError_t errSync = cudaGetLastError();
 	cudaError_t errAsync = cudaDeviceSynchronize();
@@ -262,6 +290,17 @@ int main(void) {
 	if (errAsync != cudaSuccess) {
 		printf("Async kernel error: %s\n", cudaGetErrorString(errAsync));
 	}
+
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	seconds = end.tv_sec - start.tv_sec; 
+	ns = end.tv_nsec - start.tv_nsec;
+
+	if (start.tv_nsec > end.tv_nsec) {
+	--seconds; 
+	ns += 1000000000; 
+    } 
+	time3 = ns/1000000.0f;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	// Copying the result from device to host
 	// cudaMemcpy has an implicit barrier
@@ -303,14 +342,18 @@ int main(void) {
 		// printf("%d: %lf\n", i, result[i]);
 	}
 
-	cudaFree(d_D);
-	cudaFree(d_R);
-	cudaFree(d_DD);
-	cudaFree(d_DR);
-	cudaFree(d_RR);
-	free(h_D);
-	free(h_R);
-	free(h_DD);
-	free(h_DR);
-	free(h_RR);
+	clock_gettime(CLOCK_MONOTONIC, &end);
+	seconds = end.tv_sec - start.tv_sec; 
+	ns = end.tv_nsec - start.tv_nsec;
+
+	if (start.tv_nsec > end.tv_nsec) {
+	--seconds; 
+	ns += 1000000000; 
+    } 
+	time4 = ns/1000000.0f;
+
+	printf("\n%-75s%8.4fms\n", "Time to read, allocate and initialize coordinates:", time1);
+	printf("%-75s%8.4fms\n", "Time to allocate, coopy and set memory on device and launch kernels:", time2);
+	printf("%-75s%8.4fms\n", "Time to allocate histograms on host and wait for device to finish:", time3);
+	printf("%-75s%8.4fms\n", "Time to copy the histograms from device and compute the total and result:", time4);
 }
