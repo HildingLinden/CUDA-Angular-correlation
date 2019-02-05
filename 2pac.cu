@@ -10,6 +10,7 @@
 
 const int BLOCKSIZE = 256;
 const int ROWSPERTHREAD = 256;
+const double DD_DEVICE_TO_HOST_RATIO = 0.95;
 
 // Columns are D and rows are R
 __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned long long int *gHist) {
@@ -149,10 +150,6 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 }
 
 int main(void) {
-	long seconds, ns;
-	timespec start, end;
-	float time1, time2, time3;
-
 	// Info about the GPU
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
@@ -168,8 +165,6 @@ int main(void) {
 		printf("  Shared memory per block: %zd\n", props.sharedMemPerBlock);
 		printf("  Multiprocessor count: %d\n\n", props.multiProcessorCount);
 	}
-
-	clock_gettime(CLOCK_MONOTONIC, &start);
 	
 	// Read real data file
 	std::ifstream infileD("data_100k_arcmin.txt");
@@ -220,65 +215,110 @@ int main(void) {
 	cudaMemset(d_RR, 0, 720 * sizeof(unsigned long long int));
 
 	// Device kernel for DD
-	int gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
+	int gridSizeX = (nCoordinatePairsD * DD_DEVICE_TO_HOST_RATIO + BLOCKSIZE - 1) / BLOCKSIZE;
 	int gridSizeY = (nCoordinatePairsD + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
 	dim3 DDGridSize2D(gridSizeX, gridSizeY);
-	DD_or_RR_kernel<<<DDGridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsD, d_D, d_DD);
+	DD_or_RR_kernel<<<DDGridSize2D, BLOCKSIZE>>>(nCoordinatePairsD * DD_DEVICE_TO_HOST_RATIO, nCoordinatePairsD, d_D, d_DD);
 
-	// Read synthetic data file
-	std::ifstream infileR("flat_100k_arcmin.txt");
-
-	// Get amount of coordinate pairs
+	int *hostComputationResult = (int *)calloc(720, sizeof(int));
 	int nCoordinatePairsR;
-	infileR >> nCoordinatePairsR;
-	printf("Found %d coordinate pairs in flat\n", nCoordinatePairsR);
 
-	// Allocate memory for synthetic data on host
-	float *h_R = (float *)malloc(nCoordinatePairsR * 2 * sizeof(float));
+	#pragma omp parallel
+	{
+		// Device computation
+		#pragma omp single nowait
+		{
 
-	// Read, convert from arc minutes to degrees and store in R
-	double ascR, decR;
-	index = 0;
-	while (infileR >> ascR >> decR) {
-		if (index < nCoordinatePairsR * 2) {
-			h_R[index++] = (float)(ascR * M_PI / (60.0*180.0));
-			h_R[index++] = (float)(decR * M_PI / (60.0*180.0));
-		} else {
-			printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
-			exit(1);
+			// Read synthetic data file
+			std::ifstream infileR("flat_100k_arcmin.txt");
+
+			// Get amount of coordinate pairs
+			infileR >> nCoordinatePairsR;
+			printf("Found %d coordinate pairs in flat\n", nCoordinatePairsR);
+
+			// Allocate memory for synthetic data on host
+			float *h_R = (float *)malloc(nCoordinatePairsR * 2 * sizeof(float));
+
+			// Read, convert from arc minutes to degrees and store in R
+			double ascR, decR;
+			index = 0;
+			while (infileR >> ascR >> decR) {
+				if (index < nCoordinatePairsR * 2) {
+					h_R[index++] = (float)(ascR * M_PI / (60.0*180.0));
+					h_R[index++] = (float)(decR * M_PI / (60.0*180.0));
+				} else {
+					printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
+					exit(1);
+				}
+			}
+
+			printf("\nRunning host side on %d threads\n", omp_get_num_threads());
+			printf("Computing %d%% of DD on the host\n\n", (int)((1-DD_DEVICE_TO_HOST_RATIO)*100));
+
+			cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
+			cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
+
+			// Device kernel for RR
+			gridSizeX = (nCoordinatePairsR + BLOCKSIZE - 1) / BLOCKSIZE;
+			gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+			dim3 RRGridSize2D(gridSizeX, gridSizeY);
+			DD_or_RR_kernel<<<RRGridSize2D, BLOCKSIZE>>>(nCoordinatePairsR, nCoordinatePairsR, d_R, d_RR);
+
+			// Device kernel for DR
+			gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
+			gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+			dim3 gridSize2D(gridSizeX, gridSizeY);
+			DR_kernel<<<gridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
+
+			// Allocating histograms on host
+			h_DD = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
+			h_DR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
+			h_RR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
 		}
+
+		// Host computation
+
+		// Each thread has a private histogram
+		int *localHist = (int *)calloc(720, sizeof(int));
+
+		#pragma omp for schedule(dynamic, 1) nowait
+			// Compute 1 - RR_DEVICE_TO_HOST_RATIO of columns in RR on host
+			for (int i = nCoordinatePairsD * DD_DEVICE_TO_HOST_RATIO; i < nCoordinatePairsD; i++) {
+
+				float asc1 = h_D[i * 2];
+				float dec1 = h_D[i * 2 + 1];
+
+				for (int j = i+1; j < nCoordinatePairsD; j++) {
+
+					float asc2 = h_D[j * 2];
+					float dec2 = h_D[j * 2 + 1];
+
+					float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
+
+					tmp = fminf(tmp, 1.0f);
+					tmp = fmaxf(tmp, -1.0f);
+
+					float radianResult = acosf(tmp);
+
+					float degreeResult = radianResult * 180.0f/3.14159f;
+
+					int resultIndex = floor(degreeResult * 4.0f);
+
+					localHist[resultIndex] += 2;					
+				}
+			}
+
+		int total = 0;
+		// Each thread updates the global histogram
+		for (int i = 0; i < 720; i++) {
+			total += localHist[i];
+			#pragma omp atomic
+				hostComputationResult[i] += localHist[i];
+		}
+
+		int threadId = omp_get_thread_num();
+		printf("Thread %d computed %d angles\n", threadId, total/2);
 	}
-
-	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
-	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
-
-	// Device kernel for RR
-	gridSizeX = (nCoordinatePairsR + BLOCKSIZE - 1) / BLOCKSIZE;
-	gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
-	dim3 RRGridSize2D(gridSizeX, gridSizeY);
-	DD_or_RR_kernel<<<RRGridSize2D, BLOCKSIZE>>>(nCoordinatePairsR, nCoordinatePairsR, d_R, d_RR);
-
-	// Device kernel for DR
-	gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
-	gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
-	dim3 gridSize2D(gridSizeX, gridSizeY);
-	DR_kernel<<<gridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
-
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	seconds = end.tv_sec - start.tv_sec; 
-	ns = end.tv_nsec - start.tv_nsec;
-
-	if (start.tv_nsec > end.tv_nsec) {
-	--seconds; 
-	ns += 1000000000; 
-    } 
-	time1 = ns/1000000.0f;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
-	// Allocating histograms on host
-	h_DD = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
-	h_DR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
-	h_RR = (unsigned long long int *)malloc(720 * sizeof(unsigned long long int));
 
 	// Checking for errors
 	cudaError_t errSync = cudaGetLastError();
@@ -291,17 +331,6 @@ int main(void) {
 		printf("Async kernel error: %s\n", cudaGetErrorString(errAsync));
 	}
 
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	seconds = end.tv_sec - start.tv_sec; 
-	ns = end.tv_nsec - start.tv_nsec;
-
-	if (start.tv_nsec > end.tv_nsec) {
-	--seconds; 
-	ns += 1000000000; 
-    } 
-	time2 = ns/1000000.0f;
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
 	// Copying the result from device to host
 	// cudaMemcpy has an implicit barrier
 	cudaMemcpy(h_DD, d_DD, 720 * sizeof(unsigned long long int), cudaMemcpyDeviceToHost);
@@ -312,6 +341,11 @@ int main(void) {
 	// computing for the index + 1
 	h_DD[0] += nCoordinatePairsD;
 	h_RR[0] += nCoordinatePairsR;
+
+	// Combine device and host results for RR
+	for (int i = 0; i < 720; i++) {
+		h_DD[i] += hostComputationResult[i];
+	}
 
 	printf("\n");
 	long long totalDR = 0;
@@ -355,18 +389,5 @@ int main(void) {
 	for (int i = 0; i < 5; i++) {
 		printf("%lf ", result[i]);
 	}
-
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	seconds = end.tv_sec - start.tv_sec; 
-	ns = end.tv_nsec - start.tv_nsec;
-
-	if (start.tv_nsec > end.tv_nsec) {
-	--seconds; 
-	ns += 1000000000; 
-    } 
-	time3 = ns/1000000.0f;
-
-	printf("\n\n%-65s%8.4fms\n", "Read, allocate and initialize coordinates and launch the kernels:", time1);
-	printf("%-65s%8.4fms\n", "Allocate histograms on host and wait for device to finish:", time2);
-	printf("%-65s%8.4fms\n", "Copy the histograms from device and compute the total and result:", time3);
+	printf("\n");
 }
