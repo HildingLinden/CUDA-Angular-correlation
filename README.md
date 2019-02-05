@@ -14,18 +14,25 @@ __cosf(x): 2^-21.19
 32-bit floating-point sine & cosine results per clock cycle on GPUs with compute capability 6.1: 32
 
 Overall structure:  
-/* Host */  
-Read files containing coordinates  
-Allocate memory for coordinates on host  
-Read in coordinates, convert them from arc minutes to radians and store them in memory  
-? Print information about Host/device ?  
+/* Host */
+Print information about Host/device  
+Read files
+	Read number of coordinate pairs
+	Allocate memory for coordinates on host  
+	Read in coordinates, convert them from arc minutes to radians and store them in memory  
 Allocate memory for the coordinates on the device  
-Copy the coordinates to the device  
-Allocate zero-initialized memory on host for the histograms  
-Allocate memory on device for the histograms  
-Copy the zero-initialized memory from host to device  
+Copy the coordinates to the device    
+Allocate memory on device for the histograms
+Fill device histogram memory with zeroes
 Compute the grid size and block size for the kernels  
-Launch kernels for D * R, D * D and R * R  
+Launch kernels
+
+The steps are fist done for the Coordinates in D so that the computation of DD can start as soon as possible  
+
+Allocate memory for histograms on host
+Copy the histograms from device to host when the computation is done
+Compute the omega values for the histograms
+Print the results
   
 /* Device */  
 Compute the x and y coordinate (Effectively the index in the first and second set of galaxies)  
