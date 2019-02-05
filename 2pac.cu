@@ -45,20 +45,25 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 			float asc2 = R[y + j * 2];
 			float dec2 = R[y + j * 2 + 1];
 
-			// Check if the coordinates are identical
-			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
-				// Compute the angle in radians
-				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
-				// Convert to degrees
-				float degreeResult = radianResult * 180/3.14159f;
-				// Compute the bin
-				int resultIndex = floor(degreeResult * 4.0f);
-				// Increment the bin in the shared histogram
-				atomicAdd(&sHist[resultIndex], 1);
-			} else {
-				//printf("Same coordinates in DR\n");
-				atomicAdd(&sHist[0], 1);
-			}
+			// Compute the intermediate value
+			float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
+
+			// Clamp it to -1, 1
+			tmp = fminf(tmp, 1.0f);
+			tmp = fmaxf(tmp, -1.0f);
+
+			// Compute the angle in radians
+			float radianResult = acosf(tmp);
+
+			// Convert to degrees
+			float degreeResult = radianResult * 180.0f/3.14159f;
+
+			// Compute the bin index
+			int resultIndex = floor(degreeResult * 4.0f);
+
+			// Increment the bin in the shared histogram
+			atomicAdd(&sHist[resultIndex], 1);
+
 		}
 
 		__syncthreads();
@@ -108,24 +113,27 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 		
 		for (int j = offset; j < nElements; j++) {
 			// Right ascension and declination in degrees for the current row
-			float asc2 = arr[y + j * 2];
-			float dec2 = arr[y + j * 2 + 1];
+			float asc2 = arr[(y + j) * 2];
+			float dec2 = arr[(y + j) * 2 + 1];
 
-			// Check if the coordinates are identical
-			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
-				// Compute the angle in radians
-				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
-				// Convert to degrees
-				float degreeResult = radianResult * 180/3.14159f;
-				// Compute the bin
-				int resultIndex = floor(degreeResult * 4.0f);
-				// Increment the bin in the shared histogram
-				atomicAdd(&sHist[resultIndex], 2);
-			} else {
-			 	//printf("Same coordinates in DD or RR\n");
-				// Add two we compute the angle between a pair only once
-				atomicAdd(&sHist[0], 2);
-			}
+			// Compute the intermediate value
+			float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
+
+			// Clamp it to -1, 1
+			tmp = fminf(tmp, 1.0f);
+			tmp = fmaxf(tmp, -1.0f);
+
+			// Compute the angle in radians
+			float radianResult = acosf(tmp);
+
+			// Convert to degrees
+			float degreeResult = radianResult * 180.0f/3.14159f;
+
+			// Compute the bin index
+			int resultIndex = floor(degreeResult * 4.0f);
+
+			// Increment the bin in the shared histogram
+			atomicAdd(&sHist[resultIndex], 2);
 		}
 
 		__syncthreads();
@@ -180,11 +188,11 @@ int main(void) {
 	int index = 0;
 
 	// Read, convert from arc minutes to degrees and store in D
-	float ascD, decD;
+	double ascD, decD;
 	while (infileD >> ascD >> decD) {
 		if (index < nCoordinatePairsD * 2) {
-			h_D[index++] = ascD * M_PI / (60.0f*180.0f);
-			h_D[index++] = decD * M_PI / (60.0f*180.0f);
+			h_D[index++] = (float)(ascD * M_PI / (60.0*180.0));
+			h_D[index++] = (float)(decD * M_PI / (60.0*180.0));
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in data\n");
 			exit(1);
@@ -229,12 +237,12 @@ int main(void) {
 	float *h_R = (float *)malloc(nCoordinatePairsR * 2 * sizeof(float));
 
 	// Read, convert from arc minutes to degrees and store in R
-	float ascR, decR;
+	double ascR, decR;
 	index = 0;
 	while (infileR >> ascR >> decR) {
 		if (index < nCoordinatePairsR * 2) {
-			h_R[index++] = ascR * M_PI / (60.0f*180.0f);
-			h_R[index++] = decR * M_PI / (60.0f*180.0f);
+			h_R[index++] = (float)(ascR * M_PI / (60.0*180.0));
+			h_R[index++] = (float)(decR * M_PI / (60.0*180.0));
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
 			exit(1);
@@ -306,12 +314,12 @@ int main(void) {
 	h_RR[0] += nCoordinatePairsR;
 
 	printf("\n");
-	long long totalDD = 0;
 	long long totalDR = 0;
+	long long totalDD = 0;
 	long long totalRR = 0;
 	for (int i = 0; i < 720; i++) {
-		totalDD += h_DD[i];
 		totalDR += h_DR[i];
+		totalDD += h_DD[i];
 		totalRR += h_RR[i];
 	}
 
@@ -326,8 +334,8 @@ int main(void) {
 	}
 
 	printf("Total count in histograms\n");
-	printf("DD: %lld\n", totalDD);
 	printf("DR: %lld\n", totalDR);
+	printf("DD: %lld\n", totalDD);
 	printf("RR: %lld\n\n", totalRR);
 
 	// Printing the firs t 5 values of the histograms
@@ -358,7 +366,7 @@ int main(void) {
     } 
 	time3 = ns/1000000.0f;
 
-	printf("\n\n%-75s%8.4fms\n", "Time to read, allocate and initialize coordinates and launch the kernels:", time1);
-	printf("%-75s%8.4fms\n", "Time to allocate histograms on host and wait for device to finish:", time2);
-	printf("%-75s%8.4fms\n", "Time to copy the histograms from device and compute the total and result:", time3);
+	printf("\n\n%-65s%8.4fms\n", "Read, allocate and initialize coordinates and launch the kernels:", time1);
+	printf("%-65s%8.4fms\n", "Allocate histograms on host and wait for device to finish:", time2);
+	printf("%-65s%8.4fms\n", "Copy the histograms from device and compute the total and result:", time3);
 }
