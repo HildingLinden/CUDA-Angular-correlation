@@ -45,20 +45,25 @@ __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned lon
 			float asc2 = R[y + j * 2];
 			float dec2 = R[y + j * 2 + 1];
 
-			// Check if the coordinates are identical
-			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
-				// Compute the angle in radians
-				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
-				// Convert to degrees
-				float degreeResult = radianResult * 180/3.14159f;
-				// Compute the bin
-				int resultIndex = floor(degreeResult * 4.0f);
-				// Increment the bin in the shared histogram
-				atomicAdd(&sHist[resultIndex], 1);
-			} else {
-				//printf("Same coordinates in DR\n");
-				atomicAdd(&sHist[0], 1);
-			}
+			// Compute the intermediate value
+			float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
+
+			// Clamp it to -1, 1
+			tmp = fminf(tmp, 1.0f);
+			tmp = fmaxf(tmp, -1.0f);
+
+			// Compute the angle in radians
+			float radianResult = acosf(tmp);
+
+			// Convert to degrees
+			float degreeResult = radianResult * 180.0f/3.14159f;
+
+			// Compute the bin index
+			int resultIndex = floor(degreeResult * 4.0f);
+
+			// Increment the bin in the shared histogram
+			atomicAdd(&sHist[resultIndex], 1);
+
 		}
 
 		__syncthreads();
@@ -108,24 +113,27 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 		
 		for (int j = offset; j < nElements; j++) {
 			// Right ascension and declination in degrees for the current row
-			float asc2 = arr[y + j * 2];
-			float dec2 = arr[y + j * 2 + 1];
+			float asc2 = arr[(y + j) * 2];
+			float dec2 = arr[(y + j) * 2 + 1];
 
-			// Check if the coordinates are identical
-			if (fabsf(asc1 - asc2) > 0.0000001f || fabsf(dec1 - dec2) > 0.0000001f) {
-				// Compute the angle in radians
-				float radianResult = acosf(sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2));
-				// Convert to degrees
-				float degreeResult = radianResult * 180/3.14159f;
-				// Compute the bin
-				int resultIndex = floor(degreeResult * 4.0f);
-				// Increment the bin in the shared histogram
-				atomicAdd(&sHist[resultIndex], 2);
-			} else {
-				//printf("Same coordinates in DD or RR\n");
-				// Add two we compute the angle between a pair only once
-				atomicAdd(&sHist[0], 2);
-			}
+			// Compute the intermediate value
+			float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
+
+			// Clamp it to -1, 1
+			tmp = fminf(tmp, 1.0f);
+			tmp = fmaxf(tmp, -1.0f);
+
+			// Compute the angle in radians
+			float radianResult = acosf(tmp);
+
+			// Convert to degrees
+			float degreeResult = radianResult * 180.0f/3.14159f;
+
+			// Compute the bin index
+			int resultIndex = floor(degreeResult * 4.0f);
+
+			// Increment the bin in the shared histogram
+			atomicAdd(&sHist[resultIndex], 2);
 		}
 
 		__syncthreads();
@@ -143,7 +151,7 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 int main(void) {
 	long seconds, ns;
 	timespec start, end;
-	float time1, time2, time3, time4;
+	float time1, time2, time3;
 
 	// Info about the GPU
 	int deviceCount;
@@ -174,56 +182,22 @@ int main(void) {
 	// Allocate memory for real data on host
 	float *h_D = (float *)malloc(nCoordinatePairsD * 2 * sizeof(float));
 
-	// Read synthetic data file
-	std::ifstream infileR("flat_100k_arcmin.txt");
 
-	// Get amount of coordinate pairs
-	int nCoordinatePairsR;
-	infileR >> nCoordinatePairsR;
-	printf("Found %d coordinate pairs in flat\n", nCoordinatePairsR);
-
-	// Allocate memory for synthetic data on host
-	float *h_R = (float *)malloc(nCoordinatePairsR * 2 * sizeof(float));
-
-	if (h_D == NULL || h_R == NULL) printf("Allocating memory on host failed");
+	if (h_D == NULL) printf("Allocating memory on host failed");
 
 	int index = 0;
 
 	// Read, convert from arc minutes to degrees and store in D
-	float ascD, decD;
+	double ascD, decD;
 	while (infileD >> ascD >> decD) {
 		if (index < nCoordinatePairsD * 2) {
-			h_D[index++] = ascD * 1/60 * M_PI/180;
-			h_D[index++] = decD * 1/60 * M_PI/180;
+			h_D[index++] = (float)(ascD * M_PI / (60.0*180.0));
+			h_D[index++] = (float)(decD * M_PI / (60.0*180.0));
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in data\n");
 			exit(1);
 		}
 	}
-
-	// Read, convert from arc minutes to degrees and store in R
-	float ascR, decR;
-	index = 0;
-	while (infileR >> ascR >> decR) {
-		if (index < nCoordinatePairsR * 2) {
-			h_R[index++] = ascR * 1/60 * M_PI/180;
-			h_R[index++] = decR * 1/60 * M_PI/180;
-		} else {
-			printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
-			exit(1);
-		}
-	}
-
-	clock_gettime(CLOCK_MONOTONIC, &end);
-	seconds = end.tv_sec - start.tv_sec; 
-	ns = end.tv_nsec - start.tv_nsec;
-
-	if (start.tv_nsec > end.tv_nsec) {
-	--seconds; 
-	ns += 1000000000; 
-    } 
-	time1 = ns/1000000.0f;
-	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	float *d_D;
 	float *d_R;
@@ -232,10 +206,8 @@ int main(void) {
 
 	// Allocating and copying the input data to device
 	cudaMalloc((void **)&d_D, nCoordinatePairsD * 2 * sizeof(float));
-	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
 
 	cudaMemcpy(d_D, h_D, nCoordinatePairsD * 2 * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
 
 	// Allocating the histograms arrays on device
 	cudaMalloc((void **)&d_DD, 720 * sizeof(unsigned long long int));
@@ -247,22 +219,50 @@ int main(void) {
 	cudaMemset(d_DR, 0, 720 * sizeof(unsigned long long int));
 	cudaMemset(d_RR, 0, 720 * sizeof(unsigned long long int));
 
-	// Device kernel for DR
-	int gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
-	int gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
-	dim3 gridSize2D(gridSizeX, gridSizeY);
-	DR_kernel<<<gridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
-
 	// Device kernel for DD
-	gridSizeY = (nCoordinatePairsD + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+	int gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
+	int gridSizeY = (nCoordinatePairsD + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
 	dim3 DDGridSize2D(gridSizeX, gridSizeY);
 	DD_or_RR_kernel<<<DDGridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsD, d_D, d_DD);
+
+	// Read synthetic data file
+	std::ifstream infileR("flat_100k_arcmin.txt");
+
+	// Get amount of coordinate pairs
+	int nCoordinatePairsR;
+	infileR >> nCoordinatePairsR;
+	printf("Found %d coordinate pairs in flat\n", nCoordinatePairsR);
+
+	// Allocate memory for synthetic data on host
+	float *h_R = (float *)malloc(nCoordinatePairsR * 2 * sizeof(float));
+
+	// Read, convert from arc minutes to degrees and store in R
+	double ascR, decR;
+	index = 0;
+	while (infileR >> ascR >> decR) {
+		if (index < nCoordinatePairsR * 2) {
+			h_R[index++] = (float)(ascR * M_PI / (60.0*180.0));
+			h_R[index++] = (float)(decR * M_PI / (60.0*180.0));
+		} else {
+			printf("Number of coordinate pairs given in file does not match the actual amount in flat\n");
+			exit(1);
+		}
+	}
+
+	cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
+	cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
 
 	// Device kernel for RR
 	gridSizeX = (nCoordinatePairsR + BLOCKSIZE - 1) / BLOCKSIZE;
 	gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
 	dim3 RRGridSize2D(gridSizeX, gridSizeY);
 	DD_or_RR_kernel<<<RRGridSize2D, BLOCKSIZE>>>(nCoordinatePairsR, nCoordinatePairsR, d_R, d_RR);
+
+	// Device kernel for DR
+	gridSizeX = (nCoordinatePairsD + BLOCKSIZE - 1) / BLOCKSIZE;
+	gridSizeY = (nCoordinatePairsR + ROWSPERTHREAD - 1) / ROWSPERTHREAD;
+	dim3 gridSize2D(gridSizeX, gridSizeY);
+	DR_kernel<<<gridSize2D, BLOCKSIZE>>>(nCoordinatePairsD, nCoordinatePairsR, d_D, d_R, d_DR);
 
 	clock_gettime(CLOCK_MONOTONIC, &end);
 	seconds = end.tv_sec - start.tv_sec; 
@@ -272,7 +272,7 @@ int main(void) {
 	--seconds; 
 	ns += 1000000000; 
     } 
-	time2 = ns/1000000.0f;
+	time1 = ns/1000000.0f;
 	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	// Allocating histograms on host
@@ -299,7 +299,7 @@ int main(void) {
 	--seconds; 
 	ns += 1000000000; 
     } 
-	time3 = ns/1000000.0f;
+	time2 = ns/1000000.0f;
 	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	// Copying the result from device to host
@@ -314,32 +314,46 @@ int main(void) {
 	h_RR[0] += nCoordinatePairsR;
 
 	printf("\n");
-	long long totalDD = 0;
 	long long totalDR = 0;
+	long long totalDD = 0;
 	long long totalRR = 0;
 	for (int i = 0; i < 720; i++) {
-		totalDD += h_DD[i];
 		totalDR += h_DR[i];
+		totalDD += h_DD[i];
 		totalRR += h_RR[i];
 	}
 
-	printf("Total count in histograms\n");
-	printf("DD: %lld\n", totalDD);
-	printf("DR: %lld\n", totalDR);
-	printf("RR: %lld\n", totalRR);
-
 	// Computing the difference
-	//double result[720];
-	printf("\nResult:\n");
-	for (int i = 0; i < 10; i++) {
-		//printf("%d: DD: %llu, DR: %llu, RR: %llu\n", i, h_DD[i], h_DR[i], h_RR[i]);
-		printf("  %lf\n", ((double)h_DD[i] - 2.0 * (double)h_DR[i] + (double)h_RR[i]) / (double)h_RR[i]);
-		// if(h_RR[i] == 0) {
-		// 	result[i] = 0.0;
-		// } else {
-		// 	result[i] = (h_DD[i] - 2 * h_DR[i] + h_RR[i]) / (double)h_RR[i];
-		// }
-		// printf("%d: %lf\n", i, result[i]);
+	double result[720];
+	for (int i = 0; i < 720; i++) {
+		if (h_RR[i] != 0) {
+			result[i] = (h_DD[i] - 2.0 * h_DR[i] + h_RR[i]) / (double)h_RR[i];
+		} else {
+			result[i] = 0;
+		}
+	}
+
+	printf("Total count in histograms\n");
+	printf("DR: %lld\n", totalDR);
+	printf("DD: %lld\n", totalDD);
+	printf("RR: %lld\n\n", totalRR);
+
+	// Printing the firs t 5 values of the histograms
+	printf("DR histogram ");
+	for (int i = 0; i < 5; i++) {
+		printf("%llu ", h_DR[i]);
+	}
+	printf("\nDD histogram ");
+	for (int i = 0; i < 5; i++) {
+		printf("%llu ", h_DD[i]);
+	}
+	printf("\nRR histogram ");
+	for (int i = 0; i < 5; i++) {
+		printf("%llu ", h_RR[i]);
+	}
+	printf("\nOmega values ");
+	for (int i = 0; i < 5; i++) {
+		printf("%lf ", result[i]);
 	}
 
 	clock_gettime(CLOCK_MONOTONIC, &end);
@@ -350,10 +364,9 @@ int main(void) {
 	--seconds; 
 	ns += 1000000000; 
     } 
-	time4 = ns/1000000.0f;
+	time3 = ns/1000000.0f;
 
-	printf("\n%-75s%8.4fms\n", "Time to read, allocate and initialize coordinates:", time1);
-	printf("%-75s%8.4fms\n", "Time to allocate, coopy and set memory on device and launch kernels:", time2);
-	printf("%-75s%8.4fms\n", "Time to allocate histograms on host and wait for device to finish:", time3);
-	printf("%-75s%8.4fms\n", "Time to copy the histograms from device and compute the total and result:", time4);
+	printf("\n\n%-65s%8.4fms\n", "Read, allocate and initialize coordinates and launch the kernels:", time1);
+	printf("%-65s%8.4fms\n", "Allocate histograms on host and wait for device to finish:", time2);
+	printf("%-65s%8.4fms\n", "Copy the histograms from device and compute the total and result:", time3);
 }
