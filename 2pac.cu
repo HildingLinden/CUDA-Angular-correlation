@@ -1,16 +1,17 @@
+#include <stdlib.h>	/* Atof */
+#include <stdio.h>	/* Printf */
+#include <fstream>	/* */
+#include <iostream>	/* */
+#include <math.h>	/* */
+#include <omp.h>	/* */
+#include <time.h>	/* */
 
-#include <stdio.h>
-#include <fstream>
-#include <iostream>
-#include <math.h>
-#include <omp.h>
-#include <time.h>
 
 // 2-point angular correlation
 
 const int BLOCKSIZE = 256;
 const int ROWSPERTHREAD = 256;
-const double DD_DEVICE_TO_HOST_RATIO = 0.95;
+double DD_DEVICE_TO_HOST_RATIO = 0.95;
 
 // Columns are D and rows are R
 __global__ void DR_kernel(int nCols, int nRows, float *D, float *R, unsigned long long int *gHist) {
@@ -149,7 +150,14 @@ __global__ void DD_or_RR_kernel(int nCols, int nRows, float *arr, unsigned long 
 	}
 }
 
-int main(void) {
+int main(int argc, char *argv[]) {
+	if (argc > 2) {
+		std::cerr << "Usage: " << argv[0] << " [DD_device_to_host_ratio]" << std::endl;
+		return 1;
+	} else if (argc == 2) {
+		DD_DEVICE_TO_HOST_RATIO = atof(argv[1]);
+	}
+
 	// Info about the GPU
 	int deviceCount;
 	cudaGetDeviceCount(&deviceCount);
@@ -253,7 +261,7 @@ int main(void) {
 			}
 
 			printf("\nRunning host side on %d threads\n", omp_get_num_threads());
-			printf("Computing %d%% of DD on the host\n\n", (int)((1-DD_DEVICE_TO_HOST_RATIO)*100));
+			printf("Computing %.2f%% of DD on the host\n\n", (1-DD_DEVICE_TO_HOST_RATIO)*100.0);
 
 			cudaMalloc((void **)&d_R, nCoordinatePairsR * 2 * sizeof(float));
 			cudaMemcpy(d_R, h_R, nCoordinatePairsR * 2 * sizeof(float), cudaMemcpyHostToDevice);
@@ -315,9 +323,6 @@ int main(void) {
 			#pragma omp atomic
 				hostComputationResult[i] += localHist[i];
 		}
-
-		int threadId = omp_get_thread_num();
-		printf("Thread %d computed %d angles\n", threadId, total/2);
 	}
 
 	// Checking for errors
@@ -347,7 +352,6 @@ int main(void) {
 		h_DD[i] += hostComputationResult[i];
 	}
 
-	printf("\n");
 	long long totalDR = 0;
 	long long totalDD = 0;
 	long long totalRR = 0;
