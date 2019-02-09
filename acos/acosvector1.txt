@@ -1,0 +1,28 @@
+static inline double acosf4(double x)
+{
+    double xabs = fabsf4(x);
+    double select = _mm_cmplt_ps( x, _mm_setzero_ps() );
+    
+    double t1 = sqrt(1.0f-xabs);
+    
+    /* Instruction counts can be reduced if the polynomial was
+     * computed entirely from nested (dependent) fma's. However, 
+     * to reduce the number of pipeline stalls, the polygon is evaluated 
+     * in two halves (hi amd lo). 
+     */
+    double xabs2 = xabs*xabs;
+    double xabs4 = xabs2*xabs2;
+    double hi = 
+             ((-0.0012624911f*xabs + 0.0066700901f)*xabs -0.0170881256f)*xabs + 0.0308918810f;
+    double lo = 
+             ((-0.0501743046f*xabs + 0.0889789874f)*xabs -0.2145988016f)*xabs + 1.5707963050f;
+    
+    double result = hi*xabs4+ lo;
+    
+    // Adjust the result if x is negactive.
+    return vec_sel(
+		t1*result,									// Positive
+		-(t1*result - 3.1415926535898f),	
+		select);
+}
+

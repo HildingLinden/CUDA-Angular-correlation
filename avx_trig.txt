@@ -1,0 +1,40 @@
+/* Compute the inverse cosine of packed single-precision (32-bit) floating-point
+elements in a expressed in radians, and store the results in dst. */
+__m256 _mm256_acos_ps (__m256 a)
+
+/* Compute the cosine of packed single-precision (32-bit) floating-point
+elements in a expressed in radians, and store the results in dst. */
+__m256 _mm256_cos_ps (__m256 a)
+
+/* Compute the sine of packed single-precision (32-bit) floating-point elements
+in a expressed in radians, and store the results in dst. */
+__m256 _mm256_sin_ps (__m256 a)
+
+/* Compare packed single-precision (32-bit) floating-point elements in a and b,
+and store packed minimum values in dst. */
+__m256 _mm256_min_ps (__m256 a, __m256 b)
+
+/* Compare packed single-precision (32-bit) floating-point elements in a and b,
+and store packed maximum values in dst. */
+__m256 _mm256_max_ps (__m256 a, __m256 b)
+
+acosf( sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2) )
+
+add(
+	mul(
+		sin(dec1),
+		sin(dec2)
+	),
+	mul(
+		cos(dec1),
+		mul(
+			cos(dec2),
+			cos(
+				sub(
+					asc1,
+					asc2
+				)
+			)
+		)
+	)
+)
