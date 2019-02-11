@@ -67,3 +67,4 @@ acos for positive values: https://stackoverflow.com/questions/46974513/code-for-
 General notes  
 http://web.archive.org/web/20150531202539/http://www.codeproject.com/Articles/4522/Introduction-to-SSE-Programming  
 https://www.codeproject.com/Articles/874396/Crunching-Numbers-with-AVX-and-AVX  
+https://stackoverflow.com/a/36387954. 
