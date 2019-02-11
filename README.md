@@ -58,3 +58,12 @@ Increment the first bin of DD and RR for every element in D and R, respectively.
 Calculate the total number of results in the histograms, they should add up to 10 billion.  
 Calculate the omega value of the bins in the histograms using the formula **(DD<sub>i</sub> - 2 * DR<sub>i</sub> + RR<sub>i</sub>) / RR<sub>i</sub>**  
 Free memory on host and device (This is not strictly necessary)  
+  
+AVX  
+Using SVML with ICC for sin, cos & acos: http://climserv.ipsl.polytechnique.fr/documentation/intel-icc/Getting_Started.htm  
+Using avx_mathfun with gcc for sin & cos: http://software-lisc.fbk.eu/avx_mathfun/  
+https://github.com/reyoung/avx_mathfun/blob/master/avx_mathfun.h  
+acos for positive values: https://stackoverflow.com/questions/46974513/code-for-acos-with-avx256  
+General notes  
+http://web.archive.org/web/20150531202539/http://www.codeproject.com/Articles/4522/Introduction-to-SSE-Programming  
+https://www.codeproject.com/Articles/874396/Crunching-Numbers-with-AVX-and-AVX  
