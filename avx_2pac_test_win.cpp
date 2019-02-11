@@ -1,6 +1,7 @@
+#define _USE_MATH_DEFINES
+#include <cmath> 	/* M_PI */
 #include <stdio.h> 	/* printf */
 #include <fstream> 	/* ifstream */
-#include <math.h> 	/* M_PI */
 #include <stdlib.h>	/* malloc, calloc, exit */
 #include <immintrin.h> /* AVX */
 
@@ -16,8 +17,10 @@ int main(void) {
 	printf("Found %d coordinate pairs in data\n", nCoordinatePairsD);
 
 	// Allocate memory for real data on host
-	float *h_ascD = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
-	float *h_decD = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
+	// aligned_alloc(alignment, size) on unix
+	// _aligned_malloc(size, alignment) on windows
+	float *h_ascD = (float *)_aligned_malloc(nCoordinatePairsD * sizeof(float), 32);
+	float *h_decD = (float *)_aligned_malloc(nCoordinatePairsD * sizeof(float), 32);
 
 
 	if (h_ascD == NULL || h_decD == NULL) printf("Allocating memory on host failed");
@@ -41,7 +44,7 @@ int main(void) {
 
 	if (AVX) {
 		/* Vectorized part */
-		float *result = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
+		float *result = (float *)_aligned_malloc(nCoordinatePairsD * sizeof(float), 32);
 
 		__m256 m1, m2, m3, m4, m5, m6;
 		__m256 one = _mm256_set1_ps(1.0f);
