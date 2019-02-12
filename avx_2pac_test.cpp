@@ -1,11 +1,30 @@
-#include <stdio.h> 	/* printf */
-#include <fstream> 	/* ifstream */
-#include <math.h> 	/* M_PI */
-#include <stdlib.h>	/* malloc, calloc, exit */
-#include <immintrin.h> /* AVX */
+#include <stdio.h> 			/* printf */
+#include <fstream> 			/* ifstream */
+#include <math.h> 			/* M_PI */
+#include <cmath>			/* lround */
+#include <stdlib.h>			/* malloc, calloc, exit */
+#include <immintrin.h> 		/* AVX */
+#include "avx_mathfun.h" 	/* sincos256_ps */
+
+inline __m256 acosv(__m256 x) {
+    __m256 xp = _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    // main shape
+    __m256 one = _mm256_set1_ps(1.0);
+    __m256 t = _mm256_sqrt_ps(_mm256_sub_ps(one, xp));
+    // polynomial correction factor based on xp
+    __m256 c3 = _mm256_set1_ps(-0.02007522);
+    __m256 c2 = _mm256_fmadd_ps(xp, c3, _mm256_set1_ps(0.07590315));
+    __m256 c1 = _mm256_fmadd_ps(xp, c2, _mm256_set1_ps(-0.2126757));
+    __m256 c0 = _mm256_fmadd_ps(xp, c1, _mm256_set1_ps(1.5707963267948966));
+    // positive result
+    __m256 p = _mm256_mul_ps(t, c0);
+    // correct for negative x
+    __m256 n = _mm256_sub_ps(_mm256_set1_ps(3.14159265359), p);
+    return _mm256_blendv_ps(p, n, x);
+}
 
 int main(void) {
-	bool AVX = true;
+	bool AVX = false;
 
 	// Read real data file
 	std::ifstream infileD("data_100k_arcmin.txt");
@@ -16,8 +35,8 @@ int main(void) {
 	printf("Found %d coordinate pairs in data\n", nCoordinatePairsD);
 
 	// Allocate memory for real data on host
-	float *h_ascD = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
-	float *h_decD = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
+	float *h_ascD = (float *)malloc(nCoordinatePairsD * sizeof(float));
+	float *h_decD = (float *)malloc(nCoordinatePairsD * sizeof(float));
 
 
 	if (h_ascD == NULL || h_decD == NULL) printf("Allocating memory on host failed");
@@ -29,7 +48,8 @@ int main(void) {
 	while (infileD >> ascD >> decD) {
 		if (index < nCoordinatePairsD) {
 			h_ascD[index] = (float)(ascD * M_PI / (60.0*180.0));
-			h_decD[index++] = (float)(decD * M_PI / (60.0*180.0));
+			h_decD[index] = (float)(decD * M_PI / (60.0*180.0));
+			index++;
 		} else {
 			printf("Number of coordinate pairs given in file does not match the actual amount in data\n");
 			exit(1);
@@ -41,44 +61,42 @@ int main(void) {
 
 	if (AVX) {
 		/* Vectorized part */
-		float *result = (float *)aligned_alloc(32, nCoordinatePairsD * sizeof(float));
+		float *resultArr = (float *)malloc(nCoordinatePairsD * sizeof(float));
 
-		__m256 m1, m2, m3, m4, m5, m6;
+		__m256 m1;
+		__m256 cosDec1, cosDec2, sinDec1, sinDec2;
+		__m256 result;
+
 		__m256 one = _mm256_set1_ps(1.0f);
-		__m256 negativeOne = _mm256_set1_ps(-1.0f);
+		__m256 negativeOne = _mm256_set1_ps(-1.0f);	
+		// 180/PI for rad to deg and 180/PI*4 to bin index
+		__m256 radToDegToBinIndex = _mm256_set1_ps(229.183118f);
 
-		__m256 *pAsc1 = (__m256 *)h_ascD;
-		__m256 *pAsc2 = (__m256 *)h_ascD;
-		__m256 *pDec1 = (__m256 *)h_decD;
-		__m256 *pDec2 = (__m256 *)h_decD;
-		__m256 *pResult;
+		for (int i = 0; i < 20000; i++) {
+			__m256 asc1 = _mm256_set1_ps(h_ascD[i]);
+			__m256 dec1 = _mm256_set1_ps(h_decD[i]);
 
-		for (int i = 0; i < 40000; i++) {
-			// Reset result pointer to start of result array
-			pResult = (__m256 *)result;
+			for (int j = 0; j < (20000/8); j++) {
+				__m256 asc2 = _mm256_loadu_ps(h_ascD+j*8);
+				__m256 dec2 = _mm256_loadu_ps(h_decD+j*8);
 
-			for (int j = 0; j < 40000 / 8; j++) {
+				// sin(dec1) and cos(dec1)
+				sincos256_ps(dec1, &sinDec1, &cosDec1);
+				// sin(dec2) and cos(dec2)
+				sincos256_ps(dec2, &sinDec2, &cosDec2);
 
 				// (asc1-asc2)
-				m1 = _mm256_sub_ps(*pAsc1, *pAsc2);
+				m1 = _mm256_sub_ps(asc1, asc2);
 				// cos(asc1-asc2)
-				m1 = _mm256_cos_ps(m1);
-				// cos(dec2)
-				m2 = _mm256_cos_ps(*pDec2);
+				m1 = cos256_ps(m1);				
 				// cos(dec2) * cos(asc1-asc2)
-				m1 = _mm256_mul_ps(m2, m1);
-				// cos(dec1)
-				m2 = _mm256_cos_ps(*pDec1);
+				m1 = _mm256_mul_ps(cosDec2, m1);
 				// cos(dec1) * cos(dec2) * cos(asc1-asc2)
-				m1 = _mm256_mul_ps(m2, m1);
-				// sin(dec1)
-				m2 = _mm256_sin_ps(*pDec1);
-				// sin(dec2)
-				m3 = _mm256_sin_ps(*pDec2);
+				m1 = _mm256_mul_ps(cosDec1, m1);
+
 				// sin(dec1) * sin(dec2)
-				m2 = _mm256_mul_ps(m2, m3);
 				// tmp = sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2)
-				m1 = _mm256_add_ps(m1, m2);
+				m1 = _mm256_fmadd_ps(sinDec1, sinDec2, m1);
 
 				// min(tmp, 1)
 				m1 = _mm256_min_ps(m1, one);
@@ -86,29 +104,28 @@ int main(void) {
 				m1 = _mm256_max_ps(m1, negativeOne);
 
 				// acos(tmp)
-				*pResult = _mm256_acos_ps(m1);
+				result = acosv(m1);
 
-				pAsc2++;
-				pDec2++;
-				pResult++;
+				// radian result converted to degrees
+				result = _mm256_mul_ps(result, radToDegToBinIndex);
+
+				// floor(result)
+				result = _mm256_floor_ps(result);
+
+				_mm256_storeu_ps(resultArr+j*8, result);
 			}
 
-			for (int j = 0; j < 40000; j++) {
-				float degreeResult = result[j] * 180.0f/3.14159f;
-				int resultIndex = floor(degreeResult * 4.0f);
-				hist[resultIndex]++;
+			for (int j = 0; j < 20000; j++) {
+				hist[(int)resultArr[j]]++;
 			}
-
-			pAsc1++;
-			pDec1++;
 		}
 	} else {
-		for (int i = 0; i < 40000; i++) {
+		for (int i = 0; i < 20000; i++) {
 
 			float asc1 = h_ascD[i];
 			float dec1 = h_decD[i];
 
-			for (int j = 0; j < 40000; j++) {
+			for (int j = 0; j < 20000; j++) {
 
 				float asc2 = h_ascD[j];
 				float dec2 = h_decD[j];
@@ -133,4 +150,15 @@ int main(void) {
 			}
 		}
 	}
+
+	unsigned long long int sum = 0;
+	for (int i = 0; i < 720; i++) {
+		sum += hist[i];
+	}
+	printf("Sum of histogram: %llu\n", sum);
+
+	for (int i = 0; i < 5; i++) {
+		printf("%llu ", hist[i]);
+	}
+	printf("\n");
 }
