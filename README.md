@@ -67,4 +67,7 @@ acos for positive values: https://stackoverflow.com/questions/46974513/code-for-
 General notes  
 http://web.archive.org/web/20150531202539/http://www.codeproject.com/Articles/4522/Introduction-to-SSE-Programming  
 https://www.codeproject.com/Articles/874396/Crunching-Numbers-with-AVX-and-AVX  
-https://stackoverflow.com/a/36387954. 
+https://stackoverflow.com/a/36387954.  
+Possible mask
+int diff = 100000-j*8;
+__m256i mask = _mm256_setr_epi32(-1, (diff-1)*(-1), (diff-2)*(-1), (diff-3)*(-1), (diff-4)*(-1), (diff-5)*(-1), (diff-6)*(-1), (diff-7)*(-1));  

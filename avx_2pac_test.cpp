@@ -6,6 +6,7 @@
 #include <immintrin.h> 		/* AVX */
 #include "avx_mathfun.h" 	/* sincos256_ps */
 
+/* https://stackoverflow.com/a/46991254/10105352 */
 inline __m256 acosv(__m256 x) {
     __m256 xp = _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
     // main shape
@@ -24,7 +25,7 @@ inline __m256 acosv(__m256 x) {
 }
 
 int main(void) {
-	bool AVX = false;
+	bool AVX = true;
 
 	// Read real data file
 	std::ifstream infileD("data_100k_arcmin.txt");
@@ -35,8 +36,8 @@ int main(void) {
 	printf("Found %d coordinate pairs in data\n", nCoordinatePairsD);
 
 	// Allocate memory for real data on host
-	float *h_ascD = (float *)malloc(nCoordinatePairsD * sizeof(float));
-	float *h_decD = (float *)malloc(nCoordinatePairsD * sizeof(float));
+	float *h_ascD = (float *)calloc(nCoordinatePairsD+7, sizeof(float));
+	float *h_decD = (float *)calloc(nCoordinatePairsD+7, sizeof(float));
 
 
 	if (h_ascD == NULL || h_decD == NULL) printf("Allocating memory on host failed");
@@ -61,7 +62,7 @@ int main(void) {
 
 	if (AVX) {
 		/* Vectorized part */
-		float *resultArr = (float *)malloc(nCoordinatePairsD * sizeof(float));
+		float *resultArr = (float *)calloc(nCoordinatePairsD+7, sizeof(float));
 
 		__m256 m1;
 		__m256 cosDec1, cosDec2, sinDec1, sinDec2;
@@ -72,11 +73,11 @@ int main(void) {
 		// 180/PI for rad to deg and 180/PI*4 to bin index
 		__m256 radToDegToBinIndex = _mm256_set1_ps(229.183118f);
 
-		for (int i = 0; i < 20000; i++) {
+		for (int i = 0; i < 100000; i++) {
 			__m256 asc1 = _mm256_set1_ps(h_ascD[i]);
 			__m256 dec1 = _mm256_set1_ps(h_decD[i]);
 
-			for (int j = 0; j < (20000/8); j++) {
+			for (int j = 0; j < (100000+7)/8; j++) {
 				__m256 asc2 = _mm256_loadu_ps(h_ascD+j*8);
 				__m256 dec2 = _mm256_loadu_ps(h_decD+j*8);
 
@@ -112,20 +113,24 @@ int main(void) {
 				// floor(result)
 				result = _mm256_floor_ps(result);
 
+				// integer mask
+
 				_mm256_storeu_ps(resultArr+j*8, result);
 			}
 
-			for (int j = 0; j < 20000; j++) {
-				hist[(int)resultArr[j]]++;
+			for (int j = 0; j < 100000; j++) {
+				hist[(int)resultArr[j]] += 1;
 			}
 		}
+
+		//hist[0] += 100000;
 	} else {
 		for (int i = 0; i < 20000; i++) {
 
 			float asc1 = h_ascD[i];
 			float dec1 = h_decD[i];
 
-			for (int j = 0; j < 20000; j++) {
+			for (int j = i+1; j < 20000; j++) {
 
 				float asc2 = h_ascD[j];
 				float dec2 = h_decD[j];
@@ -146,7 +151,7 @@ int main(void) {
 				int resultIndex = floor(degreeResult * 4.0f);
 
 				// Increment the bin in the shared histogram
-				hist[resultIndex]++;
+				hist[resultIndex] += 2;
 			}
 		}
 	}
