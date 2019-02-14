@@ -1,11 +1,8 @@
-2pac: 2pac.cu
-	nvcc -Ofast -ccbin=g++-7 -Xcompiler -ffast-math,-fopenmp -arch=sm_61 -Xptxas=-v -use_fast_math 2pac.cu -o 2pac
+CXX=g++-7
+NVCC=nvcc
+CXXFLAGS= "-fopt-info-vec -fopenmp -Ofast -Wall -Wextra -mfma -march=native"
+CUDAFLAGS= -arch=sm_61 -Xptxas=-v -use_fast_math
+LIBS= -lm
 
-2pac_debug: 2pac.cu
-	nvcc -g -ccbin=g++-7 -Xcompiler -ffast-math,-fopenmp -arch=sm_61 -Xptxas=-v -use_fast_math 2pac.cu -o 2pac
-
-avx: avx_2pac_test.cpp
-	g++-7 -Ofast -fopt-info-vec -Wall -Wextra -mavx2 -lm -march=native avx_2pac_test.cpp -o avx
-
-avx_debug: avx_2pac_test.cpp
-	g++-7 -g -fopt-info-vec -Wall -Wextra -mavx2 -lm -march=native avx_2pac_test.cpp -o avx
+all: 2pac.cu
+	$(NVCC) $(CUDAFLAGS) -ccbin=$(CXX) -Xcompiler $(CXXFLAGS) $(LIBS) 2pac.cu -o 2pac

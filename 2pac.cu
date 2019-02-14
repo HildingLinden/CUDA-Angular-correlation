@@ -1,13 +1,32 @@
-#include <stdlib.h>	/* Atof */
-#include <stdio.h>	/* Printf */
-#include <fstream>	/* */
-#include <iostream>	/* */
-#include <math.h>	/* */
-#include <omp.h>	/* */
-#include <time.h>	/* */
-
+#include <stdlib.h>			/* atof, malloc, alloc, exit */
+#include <stdio.h>			/* printf */
+#include <fstream>			/* ifstream */
+#include <iostream>			/* err */
+#include <math.h>			/* M_PI */
+#include <omp.h>			/* OpenMP */
+#include <immintrin.h> 		/* AVX */
+#include <cmath>			/* lround */
+#include "avx_mathfun.h"	/* sincos256_ps */
 
 // 2-point angular correlation
+
+/* https://stackoverflow.com/a/46991254/10105352 */
+inline __m256 acosv(__m256 x) {
+    __m256 xp = _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFFFFFF)));
+    // main shape
+    __m256 one = _mm256_set1_ps(1.0);
+    __m256 t = _mm256_sqrt_ps(_mm256_sub_ps(one, xp));
+    // polynomial correction factor based on xp
+    __m256 c3 = _mm256_set1_ps(-0.02007522);
+    __m256 c2 = _mm256_fmadd_ps(xp, c3, _mm256_set1_ps(0.07590315));
+    __m256 c1 = _mm256_fmadd_ps(xp, c2, _mm256_set1_ps(-0.2126757));
+    __m256 c0 = _mm256_fmadd_ps(xp, c1, _mm256_set1_ps(1.5707963267948966));
+    // positive result
+    __m256 p = _mm256_mul_ps(t, c0);
+    // correct for negative x
+    __m256 n = _mm256_sub_ps(_mm256_set1_ps(3.14159265359), p);
+    return _mm256_blendv_ps(p, n, x);
+}
 
 const int BLOCKSIZE = 256;
 const int ROWSPERTHREAD = 256;
@@ -183,8 +202,7 @@ int main(int argc, char *argv[]) {
 	printf("Found %d coordinate pairs in data\n", nCoordinatePairsD);
 
 	// Allocate memory for real data on host
-	float *h_D = (float *)malloc(nCoordinatePairsD * 2 * sizeof(float));
-
+	float *h_D = (float *)calloc(nCoordinatePairsD*2+14, sizeof(float));
 
 	if (h_D == NULL) printf("Allocating memory on host failed");
 
@@ -286,33 +304,63 @@ int main(int argc, char *argv[]) {
 
 		// Host computation
 
-		// Each thread has a private histogram
+		// Each thread has a private histogram and temporary result array
 		int *localHist = (int *)calloc(720, sizeof(int));
+		float *resultArr = (float *)calloc(nCoordinatePairsD+7, sizeof(float));
+
+		__m256 m1;
+		__m256 cosDec1, cosDec2, sinDec1, sinDec2;
+		__m256 result;
+
+		__m256 one = _mm256_set1_ps(1.0f);
+		__m256 negativeOne = _mm256_set1_ps(-1.0f);	
+		// 180/PI*4 from radians to degrees to bin index of size 0.25
+		__m256 radToDegToBinIndex = _mm256_set1_ps(229.183118f);
 
 		#pragma omp for schedule(dynamic, 1) nowait
-			// Compute 1 - RR_DEVICE_TO_HOST_RATIO of columns in RR on host
+			// Compute 1 - RR_DEVICE_TO_HOST_RATIO of columns in DD on host
 			for (int i = nCoordinatePairsD * DD_DEVICE_TO_HOST_RATIO; i < nCoordinatePairsD; i++) {
+				__m256 asc1 = _mm256_set1_ps(h_D[i*2]);
+				__m256 dec1 = _mm256_set1_ps(h_D[i*2+1]);
 
-				float asc1 = h_D[i * 2];
-				float dec1 = h_D[i * 2 + 1];
+				for (int j = i+1; j < nCoordinatePairsD; j +=8) {
+					__m256 asc2 = _mm256_loadu_ps(h_D+j*2);
+					__m256 dec2 = _mm256_loadu_ps(h_D+j*2+1);
+
+					// sin(dec1) and cos(dec1)
+					sincos256_ps(dec1, &sinDec1, &cosDec1);
+					// sin(dec2) and cos(dec2)
+					sincos256_ps(dec2, &sinDec2, &cosDec2);
+
+					// (asc1-asc2)
+					m1 = _mm256_sub_ps(asc1, asc2);
+					// cos(asc1-asc2)
+					m1 = cos256_ps(m1);				
+					// cos(dec2) * cos(asc1-asc2)
+					m1 = _mm256_mul_ps(cosDec2, m1);
+					// cos(dec1) * cos(dec2) * cos(asc1-asc2)
+					m1 = _mm256_mul_ps(cosDec1, m1);
+
+					// sin(dec1) * sin(dec2)
+					// tmp = sin(dec1) * sin(dec2) + cos(dec1) * cos(dec2) * cos(asc1-asc2)
+					m1 = _mm256_fmadd_ps(sinDec1, sinDec2, m1);
+
+					// min(tmp, 1)
+					m1 = _mm256_min_ps(m1, one);
+					// max(tmp, -1)
+					m1 = _mm256_max_ps(m1, negativeOne);
+
+					// acos(tmp)
+					result = acosv(m1);
+
+					// radian result converted to degrees
+					result = _mm256_mul_ps(result, radToDegToBinIndex);
+
+					_mm256_storeu_ps(resultArr+j, result);
+				}
 
 				for (int j = i+1; j < nCoordinatePairsD; j++) {
-
-					float asc2 = h_D[j * 2];
-					float dec2 = h_D[j * 2 + 1];
-
-					float tmp = sinf(dec1) * sinf(dec2) + cosf(dec1) * cosf(dec2) * cosf(asc1-asc2);
-
-					tmp = fminf(tmp, 1.0f);
-					tmp = fmaxf(tmp, -1.0f);
-
-					float radianResult = acosf(tmp);
-
-					float degreeResult = radianResult * 180.0f/3.14159f;
-
-					int resultIndex = floor(degreeResult * 4.0f);
-
-					localHist[resultIndex] += 2;					
+					localHist[(int)resultArr[j]] += 2;
 				}
 			}
 
@@ -323,6 +371,8 @@ int main(int argc, char *argv[]) {
 			#pragma omp atomic
 				hostComputationResult[i] += localHist[i];
 		}
+
+		printf("Total: %d\n", total);
 	}
 
 	// Checking for errors
