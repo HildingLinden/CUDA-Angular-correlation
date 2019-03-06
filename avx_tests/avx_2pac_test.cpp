@@ -1,7 +1,6 @@
 #include <stdio.h> 			/* printf */
 #include <fstream> 			/* ifstream */
 #include <math.h> 			/* M_PI */
-#include <cmath>			/* lround */
 #include <stdlib.h>			/* malloc, calloc, exit */
 #include <immintrin.h> 		/* AVX */
 #include "avx_mathfun.h" 	/* sincos256_ps */
