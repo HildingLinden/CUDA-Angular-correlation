@@ -1,3 +1,5 @@
+#include <immintrin.h>      /* AVX */
+
 static inline __m128 acosf4(__m128 x)
 {
     __m128 xabs = fabsf4(x);
