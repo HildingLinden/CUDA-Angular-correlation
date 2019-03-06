@@ -1,0 +1,28 @@
+-Think of the multiplication of the galaxy set as a matrix (cartesian product)
+-So i chose a 2-dimensional grid with 1-dimensional thread blocks, but each thread computes many angles.
+-The reason for this is mostly because it is easier to handle the indexing of computations.
+-According to NVIDIA's occupancy calculator the occupancy is 100% with a thread block size of 128, 256, 512 or 1024 with the number of registers used by the kernel at 32. The amount of shared memory is not a limiting factor. And the testing seems to agree so I chose 256.
+-The number of angles to computer per thread performs the same over 32 so I agains chose 256.
+
+-The computations are done with single-precision floating point numbers. This makes it ??? faster than using double-precision floating point numbers and the accuracy is still satisfactory.
+-The histograms are first kept in a shared memory array of unsigned integers that the whole  thread block share. Then when all threads are done with the computations and are synchronized, the thread 0 will add the values of the local histogram to the global histogram. Both the local and global histograms are updated with atomicAdd. The global histogram uses the data type unsigned long long int to be sure that it has enough range. In the worst case scenario highest value in a bin could be the total number of angles computed which in this case would be 10^10. Unsigned long long int is what is usually called unsigned long int (64-bit). 
+-I use the switch -ffast-math for the host side and -use_fast_math for the device side to gain even more speed but lose accuracy, however the precision is still within a reasonable limit. In CUDA, the -use_fast_math switch enables the use of intrinsic funtions for floating point computations.
+
+-For calculating the histograms DD and RR you can skip double counting because you know that a*b==b*a and therefor can increment the bin for that particular angle with 2. This reduces the number of computation by half.
+-Furthermore you can skip self counting because it is always zero and instead add the number of galaxies in the set to the first bin (0 degrees)
+-I've used hybrid computing to compute some of the angles on the CPU in parallel. OpenMP is used to parallelize the code to many threads and AVX is used to vectorize the computation.
+
+-The speedup on CPU on an intel i7-6700k processor for OpenMP using 8 threads was 6x. The reason for this is that the processor only has 4 physical cores and 4 virtual cores so only 4 threads can be executed at a time on the FPU. The hyper-threading does mask some memory fetching and instruction decoding latencies. Using AVX vector instructions with 256-bit vectors (8 single-precision floating point values) the code is sped up by a factor of 8x. The reason for this is of course that there are 8 values in parallel that is being computed and also that the trigonometric functions of sin, cos and acos are approximated and have beter performance than the standard libraries but also suffer from reduced accuracy.
+
+-Only one of the two galaxy sets are read in before starting the computation on both the host and the device to start the computation as early as possible. The second file is then read while the angles in the first one is being computed. 
+-The ratio for device to host computation is manually set, the CPU is able to compute about 20% of the DD histogram while the GPU computes the rest of that histogram and both the RR and DR histograms.
+
+-A large part of the time the program takes is for CUDAMalloc so with larger amount of computations
+
+-Time for Host side:
+-Time for Host OpenMP:
+-Time for Host Side AVX
+-Time for Device side computaion
+-Time for the whole program to finnish
+
+-Show results of computation
